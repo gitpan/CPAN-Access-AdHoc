@@ -1,0 +1,75 @@
+---
+abstract: 'Provide ad-hoc access to a CPAN repository'
+author:
+  - 'Tom Wyant (wyant at cpan dot org)'
+build_requires:
+  Test::More: 0.88
+dynamic_config: 1
+generated_by: 'Module::Build version 0.38, CPAN::Meta::Converter version 2.113640'
+license: perl
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+name: CPAN-Access-AdHoc
+no_index:
+  directory:
+    - inc
+    - mock
+    - t
+    - xt
+provides:
+  CPAN::Access::AdHoc:
+    file: lib/CPAN/Access/AdHoc.pm
+    version: 0.000_01
+  CPAN::Access::AdHoc::Archive:
+    file: lib/CPAN/Access/AdHoc/Archive.pm
+    version: 0.000_01
+  CPAN::Access::AdHoc::Archive::Null:
+    file: lib/CPAN/Access/AdHoc/Archive/Null.pm
+    version: 0.000_01
+  CPAN::Access::AdHoc::Archive::Tar:
+    file: lib/CPAN/Access/AdHoc/Archive/Tar.pm
+    version: 0.000_01
+  CPAN::Access::AdHoc::Archive::Zip:
+    file: lib/CPAN/Access/AdHoc/Archive/Zip.pm
+    version: 0.000_01
+  CPAN::Access::AdHoc::Default::CPAN::CPAN:
+    file: lib/CPAN/Access/AdHoc/Default/CPAN/CPAN.pm
+    version: 0.000_01
+  CPAN::Access::AdHoc::Default::CPAN::CPAN::Mini:
+    file: lib/CPAN/Access/AdHoc/Default/CPAN/CPAN/Mini.pm
+    version: 0.000_01
+  CPAN::Access::AdHoc::Default::CPAN::CPANPLUS:
+    file: lib/CPAN/Access/AdHoc/Default/CPAN/CPANPLUS.pm
+    version: 0.000_01
+  CPAN::Access::AdHoc::Default::CPAN::cpanm:
+    file: lib/CPAN/Access/AdHoc/Default/CPAN/cpanm.pm
+    version: 0.000_01
+  CPAN::Access::AdHoc::Util:
+    file: lib/CPAN/Access/AdHoc/Util.pm
+    version: 0.000_01
+requires:
+  Archive::Tar: 0
+  Archive::Zip: 0
+  CPAN: 0
+  CPAN::Meta: 0
+  Carp: 0
+  Config::Tiny: 0
+  Cwd: 0
+  File::Find: 0
+  File::HomeDir: 0
+  File::Spec: 0
+  Getopt::Long: 2.33
+  IO::File: 0
+  IO::Uncompress::Bunzip2: 0
+  IO::Uncompress::Gunzip: 0
+  LWP::UserAgent: 0
+  Text::ParseWords: 0
+  base: 0
+  perl: 5.006002
+  strict: 0
+  warnings: 0
+resources:
+  bugtracker: https://rt.cpan.org/Public/Dist/Display.html?Name=CPAN-Access-AdHoc
+  license: http://dev.perl.org/licenses/
+version: 0.000_01

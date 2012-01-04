@@ -1,0 +1,7 @@
+File:            02packages.details.txt
+Description:     Package names found in directory $CPAN/authors/id/
+Columns:         package name, version, path
+
+Johann                           0.001    B/BA/BACH/Johann-0.001.tar.bz2
+PDQ                              0.000_01 B/BA/BACH/PDQ-0.000_01.zip
+Yehudi                           0.001    M/ME/MENUHIN/Yehudi-0.001.tar.gz
