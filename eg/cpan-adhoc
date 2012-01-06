@@ -17,7 +17,7 @@ use Pod::Usage;
 use Term::ReadLine;
 use version 0.77;
 
-our $VERSION = '0.000_01';
+our $VERSION = '0.000_02';
 
 use constant CURRENT_PACKAGE => 'current';
 
@@ -71,6 +71,8 @@ while ( defined( my $buffer = $rl->( 'cpan-adhoc> ' ) ) ) {
     }
 }
 
+say '';
+
 sub verb_alias {
     my ( $old, $new ) = @_;
     defined $old
@@ -107,6 +109,24 @@ sub verb_cd {
 	chdir
 	    or die "Failed to cd to home directory: $!\n";
     }
+    return;
+}
+
+sub verb_cpan {
+    my @arg = _expand_default( @_ );
+    @arg
+	and $cad->cpan( @arg );
+    defined $arg[0]
+	or say $cad->cpan();
+    return;
+}
+
+sub verb_default_cpan_source {
+    my @arg = _expand_default( @_ );
+    @arg
+	and $cad->default_cpan_source( @arg );
+    defined $arg[0]
+	or say $cad->default_cpan_source();
     return;
 }
 
@@ -166,7 +186,7 @@ sub verb_extract {
 }
 
 sub verb_help {
-    pod2usage( { -verbose => 2 } );
+    pod2usage( { -verbose => 2, -exitval => 'NOEXIT' } );
     return;
 }
 
@@ -257,6 +277,24 @@ sub verb_perldoc {
 sub verb_pwd {
     say cwd;
     return;
+}
+
+sub _expand_default {
+    local @ARGV = @_;
+    my %opt;
+    GetOptions( \%opt, qw{ default! } )
+	or die "The only legal option is -default\n";
+    if ( $opt{default} ) {
+	@ARGV
+	    and die "You may not specify both -default and an argument\n";
+	return ( undef );
+    } elsif ( @ARGV ) {
+	@ARGV == 1
+	    or die "You may not specify more than one argument\n";
+	return @ARGV;
+    } else {
+	return;
+    }
 }
 
 sub _fetch_file {
@@ -386,6 +424,12 @@ alias.
 The single-argument version creates an alias for the current package, if
 any.
 
+=head2 base
+
+This command displays the base directories for the named packages. If no
+package is specified, the current package, if any, is displayed.
+Packages must be fetched before they can be displayed.
+
 =head2 cd
 
  cpan-adhoc> cd fu/bar
@@ -400,11 +444,42 @@ Without an argument, it changes to the user's home directory.
 
 This command removes all packages from the stash.
 
-=head2 base
+=head2 cpan
 
-This command displays the base directories for the named packages. If no
-package is specified, the current package, if any, is displayed.
-Packages must be fetched before they can be displayed.
+ cpan-adhoc> cpan
+ cpan-adhoc> cpan file:///home/yehudi/Mini-CPAN/
+ cpan-adhoc> cpan -default
+
+If no argument is specified, this command displays the CPAN URL being
+used.
+
+If an argument is specified, this command sets the CPAN URL being used.
+
+If the CPAN URL was specified as C<-default>, a default value is
+computed from the current setting of C<cpan_default_source>, and that
+value is both set as the current soure and displayed. If no default can
+be computed from the current C<cpan_default_source>, an error is
+displayed and the current setting is left unchanged.
+
+=head2 cpan_default_source
+
+ cpan-adhoc> cpan_default_source
+ cpan-adhoc> cpan_default_source cpanm,CPAN
+ cpan-adhoc> cpan_default_source -default
+
+If no argument is specified, this command displays the sources of
+default CPAN URLs being used.
+
+If an argument is specified, this command sets the sources of default
+CPAN URLs. The value is a comma-delimited list.
+
+If the argument was specified as C<-default>, the default value is
+reinstated.
+
+B<Note> that setting this value does not affect the C<cpan> setting. If
+you want to recompute the C<cpan> URL after setting this, you must do
+
+ cpan-adhoc> cpan -default
 
 =head2 diff
 

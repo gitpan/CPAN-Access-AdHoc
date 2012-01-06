@@ -7,8 +7,10 @@ use warnings;
 
 use CPAN::Access::AdHoc::Util;
 use Cwd ();
+use File::Spec;
+use File::Spec::Unix;
 
-our $VERSION = '0.000_01';
+our $VERSION = '0.000_02';
 
 my $configured = eval {
     CPAN::Access::AdHoc::Util->load( 'CPAN::Mini' );
@@ -28,7 +30,11 @@ sub get_default {
     $local = Cwd::abs_path( $local );
     -d $local
 	or return;
-    return 'file://' . $local;
+    my ( $dev, $dir, $base ) = File::Spec->splitpath( $local );
+    defined $dev
+	and $dev =~ s/ : \z /|/smx;	# VMS, Windows
+    my @path = grep { defined $_ && $_ ne '' } File::Spec->splitdir( $dir );
+    return 'file://' .  File::Spec::Unix->catfile( $dev, @path, $base );
 }
 
 1;

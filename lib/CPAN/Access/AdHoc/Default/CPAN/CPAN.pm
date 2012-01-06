@@ -5,10 +5,9 @@ use 5.008;
 use strict;
 use warnings;
 
-use CPAN ();
 use CPAN::Access::AdHoc::Util;
 
-our $VERSION = '0.000_01';
+our $VERSION = '0.000_02';
 
 my $configured = eval {
     CPAN::Access::AdHoc::Util::load( 'CPAN' );
