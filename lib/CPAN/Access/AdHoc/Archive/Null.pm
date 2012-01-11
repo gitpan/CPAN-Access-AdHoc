@@ -9,11 +9,12 @@ use base qw{ CPAN::Access::AdHoc::Archive };
 
 use File::Path 2.07 ();
 use File::Spec ();
+use HTTP::Date ();
 use IO::File ();
 use IO::Uncompress::Bunzip2 ();
 use IO::Uncompress::Gunzip ();
 
-our $VERSION = '0.000_02';
+our $VERSION = '0.000_03';
 
 my $_attr = sub {
     my ( $self ) = @_;
@@ -49,6 +50,8 @@ sub new {
 
     if ( defined( my $content = delete $arg{content} ) ) {
 
+	my $mtime = delete $arg{mtime};
+
 	my $file_name = ref $content ? 'unknown' : $content;
 
 	if ( my $encoding = delete $arg{encoding} ) {
@@ -59,13 +62,19 @@ sub new {
 	    local $/ = undef;	# Slurp mode
 	    open my $fh, '<', $content
 		or $_wail->( "Unable to open $content: $!" );
+	    my @stat = stat $fh;
 	    $content = <$fh>;
 	    close $fh;
+	    @stat
+		and $mtime = $stat[9];
 	} elsif ( 'SCALAR' eq ref $content ) {
 	    $content = ${ $content };
 	}
 
-	$attr->{contents}{$file_name} = $content;
+	$attr->{contents}{$file_name} = {
+	    content	=> $content,
+	    mtime	=> $mtime,
+	};
 
 	$self->archive( undef );
 
@@ -90,8 +99,8 @@ sub extract {
 
     foreach my $name ( keys %{ $attr->{contents} } ) {
 	my $fh = IO::File->new( $name, '>' )
-	    or $_wail->( "Failed to open $name for output: $!" );
-	print { $fh } $attr->{contents}{$name};
+	    or $_wail->( "Unable to open $name for output: $!" );
+	print { $fh } $attr->{contents}{$name}{content};
     }
 
     return $self;
@@ -107,7 +116,20 @@ sub get_item_content {
 	( $file ) = keys %{ $attr->{contents} };
     }
 
-    return $attr->{contents}{$file};
+    return $attr->{contents}{$file}{content};
+}
+
+sub get_item_mtime {
+    my ( $self, $file ) = @_;
+    my $attr = $_attr->( $self );
+
+    if ( defined $file ) {
+	$file = $self->base_directory() . $file;
+    } else {
+	( $file ) = keys %{ $attr->{contents} };
+    }
+
+    return $attr->{contents}{$file}{mtime};
 }
 
 {
@@ -123,11 +145,15 @@ sub get_item_content {
 	    or $content_type =~ m{ \A text/ }smx
 	    or return;
 
+	my $mtime = HTTP::Date::str2time(
+	    scalar $rslt->header( 'Last-Modified' ) );
+
 	return $class->new(
 	    content	=> \( scalar $rslt->content() ),
 	    encoding	=> scalar $rslt->header( 'Content-Encoding' ),
+	    mtime	=> $mtime,
 	    path	=> scalar $rslt->header( 'Content-Location' ),
-	)->get_item_content();
+	);
     }
 
 }
@@ -190,8 +216,8 @@ This class supports the following public methods:
 
 =head2 new
 
-This static method instantiates the object, and possibly loads it.
-There are two supported arguments:
+This static method instantiates the object, and possibly loads it. The
+supported arguments are:
 
 =over
 
@@ -208,6 +234,18 @@ If this argument is a scalar reference, the file name is set to
 
 This is the MIME encoding of the content. It is ignored if the content
 is not present.
+
+=item mtime
+
+This is the modification time of the content. If the content is not a
+reference, it is taken as a file name, so this argument is ignored and
+the modification time of the file is used instead.
+
+=item path
+
+This is intended to be a path to the content. If not specified, and the
+content argument is a file name (i.e. not a reference), this defaults to
+the content argument.
 
 =back
 

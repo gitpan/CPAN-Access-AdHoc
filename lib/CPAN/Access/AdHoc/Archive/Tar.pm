@@ -13,7 +13,7 @@ use IO::File ();
 use IO::Uncompress::Bunzip2 ();
 use IO::Uncompress::Gunzip ();
 
-our $VERSION = '0.000_02';
+our $VERSION = '0.000_03';
 
 my $_attr = sub {
     my ( $self ) = @_;
@@ -54,7 +54,8 @@ my $_wail = sub {
 		    or $_wail->( "Unsupported encoding '$encoding'" );
 		$content = $decode{$encoding}->( $content );
 	    } elsif ( ref $content ) {
-		$content = IO::File->new( $content, '<' );
+		$content = IO::File->new( $content, '<' )
+		    or $_wail->( "Unable to open string reference: $!" );
 	    }
 
 	    ref $content
@@ -107,6 +108,15 @@ sub get_item_content {
     my ( $self, $file ) = @_;
     $file = $self->base_directory() . $file;
     return $self->archive()->get_content( $file );
+}
+
+sub get_item_mtime {
+    my ( $self, $file ) = @_;
+    $file = $self->base_directory() . $file;
+    my @files = $self->archive()->get_files( $file );
+    @files
+	and return $files[0]->mtime();
+    return;
 }
 
 {

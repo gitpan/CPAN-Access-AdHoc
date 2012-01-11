@@ -5,46 +5,52 @@ use 5.008;
 use strict;
 use warnings;
 
+use POSIX ();
 use Test::More 0.88;	# Because of done_testing();
 
 use lib qw{ mock };
 
 use CPAN::Access::AdHoc;
 
-my $text;
-{
-    my $fn = 'mock/repos/modules/02packages.details.txt';
-    local $/ = undef;	# Slurp
-    open my $fh, '<', $fn
-	or die "Unable to read $fn: $!\n";
-    $text = <$fh>;
-    close $fh;
-}
+my %maybe_bad_mtime = map { $_ => 1 } qw{ DOS MSWin32 cygwin };
+
+my $text = slurp( 'mock/repos/modules/02packages.details.txt' );
 
 my $cad = CPAN::Access::AdHoc->new();
 
 # Test access to module index
 
-is $cad->fetch( 'modules/02packages.details.txt' ), $text,
+is $cad->fetch( 'modules/02packages.details.txt' )->get_item_content(),
+    $text,
     'Fetch the un-compressed packages details';
 
-is $cad->fetch( 'modules/02packages.details.txt.gz' ), $text,
+{
+    my $got = $cad->fetch( 'modules/02packages.details.txt'
+    )->get_item_mtime(),
+    my $want = ( stat 'mock/repos/modules/02packages.details.txt' )[9];
+    ok abs( $got - $want ) < 2,
+    'Can get modules/02packages.details.txt mod time'
+	or mtime_diag( $got, $want );
+}
+
+is $cad->fetch( 'modules/02packages.details.txt.gz' )->get_item_content(),
+    $text,
     'Fetch the compressed packages details';
 
 my ( $module_index, $meta ) = $cad->fetch_module_index();
 
 is_deeply $module_index, {
     Johann	=> {
-	package	=> 'B/BA/BACH/Johann-0.001.tar.bz2',
-	version	=> 0.001,
+	distribution	=> 'B/BA/BACH/Johann-0.001.tar.bz2',
+	version		=> 0.001,
     },
     PDQ		=> {
-	package	=> 'B/BA/BACH/PDQ-0.000_01.zip',
-	version => '0.000_01',
+	distribution	=> 'B/BA/BACH/PDQ-0.000_01.zip',
+	version		=> '0.000_01',
     },
     Yehudi => {
-	package	=> 'M/ME/MENUHIN/Yehudi-0.001.tar.gz',
-	version	=> 0.001,
+	distribution	=> 'M/ME/MENUHIN/Yehudi-0.001.tar.gz',
+	version		=> 0.001,
     },
 }, 'Contents of the repository index';
 
@@ -73,7 +79,7 @@ is_deeply $author_index, {
 
 {
     my ( $registered_module_index, $meta ) =
-    $cad->fetch_registered_module_index();
+	$cad->fetch_registered_module_index();
 
     my $desc = <<'EOD';
 These are the data that are published in the module
@@ -93,74 +99,80 @@ EOD
 	Date =>		'Mon, 26 Dec 2011 17:10:00 GMT',
     }, 'Metadata for 03modlist.data';
 
-    is $registered_module_index, <<'EOD',
-package CPAN::Modulelist;
-# Usage: print Data::Dumper->new([CPAN::Modulelist->data])->Dump or similar
-# cannot 'use strict', because we normally run under Safe
-# use strict;
-sub data {
-my $result = {};
-my $primary = "modid";
-for (@$CPAN::Modulelist::data){
-my %hash;
-@hash{@$CPAN::Modulelist::cols} = @$_;
-$result->{$hash{$primary}} = \%hash;
+    is_deeply $registered_module_index, {
+	Johann	=> {
+	    modid	=> 'Johann',
+	    statd	=> 'R',
+	    stats	=> 'd',
+	    statl	=> 'p',
+	    stati	=> 'O',
+	    statp	=> 'p',
+	    description	=> 'Represents Johann Sebastian Bach',
+	    userid	=> 'BACH',
+	    chapterid	=> '023',
+	},
+	Yehudi	=> {
+	    modid	=> 'Yehudi',
+	    statd	=> 'R',
+	    stats	=> 'd',
+	    statl	=> 'p',
+	    stati	=> 'O',
+	    statp	=> 'p',
+	    description	=> 'Represents Yehudi Menuhin',
+	    userid	=> 'MENUHIN',
+	    chapterid	=> '023',
+	},
+    }, 'Data for 03modlist.data';
+
 }
-$result;
-}
-$CPAN::Modulelist::cols = [
-'modid',	# Module ID
-'statd',	# Development stage (icabRMS?)
-'stats',	# Support level (dmuna?)
-'statl',	# Language used (pc+oh?)
-'stati',	# Interface style (frOphn?)
-'statp',	# Public license (pglba2odrn?)
-'description',
-'userid',	# CPAN ID
-'chapterid'	# Module List Chapter (002 - 028)
-];
-$CPAN::Modulelist::data = [
-[
-'Yehudi',
-'R',
-'d',
-'p',
-'O',
-'p',
-'Represents Yehudi Menuhin',
-'MENUHIN',
-'023'
-],
-[
-'Johann',
-'R',
-'d',
-'p',
-'O',
-'p',
-'Represents Johann Sebastian Bach',
-'BACH',
-'023'
-],
-];
-EOD
-    'Content of 03modlist.data';
+
+# Test access to CHECKSUMS.
+
+{
+    my $cksum = do 'mock/repos/authors/id/B/BA/BACH/CHECKSUMS';
+
+    is_deeply $cad->fetch_distribution_checksums( 'BACH/' ),
+        $cksum, 'BACH/CHECKSUMS';
+
+    is_deeply $cad->fetch_distribution_checksums(
+	    'BACH/Johann-0.001.tar.bz2' ),
+	$cksum->{ 'Johann-0.001.tar.bz2' },
+	'BACH/Johann-0.001.tar.bz2 checksums';
+
+    ok ! defined scalar $cad->fetch_distribution_checksums(
+	    'BACH/Carl-Philipp-Emanuel-0.001.tar.gz' ),
+	'BACH/Carl-Philipp-Emanuel-0.001.tar.gz has no checksum';
 }
 
 # Test access to .tar.gz archive
 
 SKIP: {
-    my $tests = 6;
+    my $tests = 8;
 
-    my $pkg = $module_index->{Yehudi}{package}
+    my $pkg = $module_index->{Yehudi}{distribution}
 	or skip q{Module 'Yehudi' not indexed}, $tests;
 
-    my $kit = $cad->fetch_package_archive( $pkg );
+    my $kit = $cad->fetch_distribution_archive( $pkg );
 
-    ok $kit, "Fetch package '$pkg'";
+    ok $kit, "Fetch distribution '$pkg'";
 
     is $kit->path(), 'authors/id/M/ME/MENUHIN/Yehudi-0.001.tar.gz',
 	'Path to Yehudi-0.001.tar.gz';
+
+    is $kit->get_item_content( 'Makefile.PL' ),
+	slurp( 'mock/src/repos/MENUHIN/Yehudi/Makefile.PL' ),
+	"Can extract Makefile.PL from $pkg";
+
+TODO: {
+
+	local $TODO = 'Does not work on kit expanded from tarball';
+
+	my $got = $kit->get_item_mtime( 'Makefile.PL' );
+	my $want = ( stat 'mock/src/repos/MENUHIN/Yehudi/Makefile.PL' )[9];
+	ok abs( $got - $want ) < 2,
+	"Can get Makefile.PL mod time from $pkg"
+	    or mtime_diag( $got, $want );
+    }
 
     my $meta = $kit->metadata();
 
@@ -197,12 +209,12 @@ SKIP: {
 SKIP: {
     my $tests = 5;
 
-    my $pkg = $module_index->{Johann}{package}
+    my $pkg = $module_index->{Johann}{distribution}
 	or skip q{Module 'Johann' not indexed}, $tests;
 
-    my $kit = $cad->fetch_package_archive( $pkg );
+    my $kit = $cad->fetch_distribution_archive( $pkg );
 
-    ok $kit, "Fetch package '$pkg'";
+    ok $kit, "Fetch distribution '$pkg'";
 
     is $kit->path(), 'authors/id/B/BA/BACH/Johann-0.001.tar.bz2',
 	'Path to Johann-0.001.tar.bz2';
@@ -220,17 +232,31 @@ SKIP: {
 # Test access to .zip archive
 
 SKIP: {
-    my $tests = 6;
+    my $tests = 8;
 
-    my $pkg = $module_index->{PDQ}{package}
+    my $pkg = $module_index->{PDQ}{distribution}
 	or skip q{Module 'PDQ' not indexed}, $tests;
 
-    my $kit = $cad->fetch_package_archive( $pkg );
+    my $kit = $cad->fetch_distribution_archive( $pkg );
 
-    ok $kit, "Fetch package '$pkg'";
+    ok $kit, "Fetch distribution '$pkg'";
 
     is $kit->path(), 'authors/id/B/BA/BACH/PDQ-0.000_01.zip',
 	'Path to PDQ-0.000_01.zip';
+
+    is $kit->get_item_content( 'Makefile.PL' ),
+	slurp( 'mock/src/repos/BACH/PDQ/Makefile.PL' ),
+	"Can extract Makefile.PL from $pkg";
+
+TODO: {
+	local $TODO = 'Does not work on kit expanded from tarball';
+
+	my $got = $kit->get_item_mtime( 'Makefile.PL' );
+	my $want = ( stat 'mock/src/repos/BACH/PDQ/Makefile.PL' )[9];
+	ok abs( $got - $want ) < 2,
+	"Can get Makefile.PL mod time from $pkg"
+	    or mtime_diag( $got, $want );
+    }
 
     my $meta = $kit->metadata();
 
@@ -264,8 +290,30 @@ SKIP: {
 
 done_testing;
 
+sub mtime_diag {
+    my ( $got, $want ) = map { strftime( $_ ) } @_;
+    return diag( <<"EOD" );
+    got: $got
+    expected: $want
+    This test may fail if your kit is on a FAT filesystem
+EOD
+}
 
 
+sub slurp {
+    my ( $fn ) = @_;
+    local $/ = undef;
+    open my $fh, '<', $fn
+	or die "Unable to open $fn for input: $!\n";
+    my $text = <$fh>;
+    close $fh;
+    return $text;
+}
+
+sub strftime {
+    my ( $time ) = @_;
+    return POSIX::strftime( '%d-%b-%Y %H:%M:%S GMT', gmtime $time );
+}
 
 1;
 

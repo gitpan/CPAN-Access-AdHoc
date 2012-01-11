@@ -10,7 +10,7 @@ use CPAN::DistnameInfo;
 use Getopt::Long 2.33;
 use Pod::Usage;
 
-our $VERSION = '0.000_02';
+our $VERSION = '0.000_03';
 
 my %opt;
 
@@ -22,17 +22,21 @@ GetOptions( \%opt,
 my $cad = CPAN::Access::AdHoc->new( cpan => $opt{cpan} );
 
 my %ext;
-foreach my $pkg ( $cad->indexed_packages() ) {
+foreach my $pkg ( $cad->indexed_distributions() ) {
     my $dist = CPAN::DistnameInfo->new( $pkg );
     my $xt = $dist->extension();
     if ( not defined $xt ) {
-	$opt{quiet}
-	    or warn "$pkg has an undefined extension\n";
+	if ( $pkg =~ m/ [.] ( pm [.] gz ) \z /smx ) {
+	    $ext{$1}++;
+	} else {
+	    $opt{quiet}
+		or warn "$pkg has an unknown extension\n";
+	}
     } elsif ( '' eq $xt ) {
 	$opt{quiet}
 	    or warn "$pkg has an empty extension\n";
     } else {
-	$ext{ $dist->extension() }++;
+	$ext{$xt}++;
     }
 }
 
@@ -74,11 +78,12 @@ This option displays the version of this script. The script then exits.
 
 =head1 DETAILS
 
-This Perl script feeds all the indexed packages in a CPAN repository to
-L<CPAN::DistnameInfo|CPAN::DistnameInfo> and lists the unique file name
-extensions found in the repository. Informational messages about
-packages that do not have recognized extensions are printed to standard
-error, and can be supressed with the C<-quiet> option.
+This Perl script feeds all the indexed distributions in a CPAN
+repository to L<CPAN::DistnameInfo|CPAN::DistnameInfo> and lists the
+unique file name extensions found in the repository. Informational
+messages about distributions that do not have recognized extensions are
+printed to standard error, and can be supressed with the C<-quiet>
+option.
 
 =head1 AUTHOR
 

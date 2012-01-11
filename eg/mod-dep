@@ -9,7 +9,7 @@ use CPAN::Access::AdHoc;
 use Getopt::Long 2.33;
 use Pod::Usage;
 
-our $VERSION = '0.000_02';
+our $VERSION = '0.000_03';
 
 my %opt;
 
@@ -42,12 +42,12 @@ sub mod_dep {
 
 	say $indent, "$module $info->{version}";
 	$indent .= '  ';
-	$info->{package} =~ m{ / perl -? \d+ [.] }smx
+	$info->{distribution} =~ m{ / perl -? \d+ [.] }smx
 	    and do {
 	    say $indent, 'In core';
 	    return;
 	};
-	my $meta = $cad->fetch_package_archive( $info->{package} )
+	my $meta = $cad->fetch_distribution_archive( $info->{distribution} )
 	->metadata()
 	    or do {
 	    say $indent, 'Prerequisites not available';

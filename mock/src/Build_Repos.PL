@@ -3,6 +3,7 @@ use 5.008;
 use strict;
 use warnings;
 
+use CPAN::Checksums qw{ updatedir };
 use CPAN::Meta;
 use Cwd qw{ cwd };
 use ExtUtils::MakeMaker;
@@ -91,8 +92,11 @@ foreach my $user ( bsd_glob( 'mock/src/repos/*' ) ) {
 		@kit > 1
 		    and die "Multiple kits @kit for $dist";
 
-		my $package = join '/', substr( $cpan_id, 0, 1 ),
-		    substr( $cpan_id, 0, 2 ), $cpan_id, $kit[0];
+		my $distribution = join '/',
+		    substr( $cpan_id, 0, 1 ),
+		    substr( $cpan_id, 0, 2 ),
+		    $cpan_id,
+		    $kit[0];
 
 		$opt{verbose}
 		    and print "    $kit[0]\n";
@@ -101,7 +105,7 @@ foreach my $user ( bsd_glob( 'mock/src/repos/*' ) ) {
 		%{ $provides } or $provides = _provides();
 		while ( my ( $module, $data ) = each %{ $provides } ) {
 		    $module_index{$module} ||= {
-			package => $package,
+			distribution => $distribution,
 			version	=> $data->{version},
 		    };
 		}
@@ -136,7 +140,7 @@ foreach my $user ( bsd_glob( 'mock/src/repos/*' ) ) {
 	}
     }
 
-    # TODO CHECKSUM file, with CPAN::Checksums
+    updatedir( $dest_dir );
 
 }
 
@@ -163,7 +167,7 @@ foreach my $user ( bsd_glob( 'mock/src/repos/*' ) ) {
 	defined $version
 	    or $version = 'undef';
 	printf $fh "%-32s %-8s %s\n", $module, $version,
-	    $module_index{$module}{package};
+	    $module_index{$module}{distribution};
     }
     $fh->close();
 

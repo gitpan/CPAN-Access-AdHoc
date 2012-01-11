@@ -9,7 +9,7 @@ use CPAN::Access::AdHoc;
 use Getopt::Long 2.33;
 use Pod::Usage;
 
-our $VERSION = '0.000_02';
+our $VERSION = '0.000_03';
 
 my %opt;
 
@@ -22,7 +22,7 @@ my @res = map { qr{ $_ }smx } @ARGV;
 
 my $cad = CPAN::Access::AdHoc->new( cpan => $opt{cpan} );
 
-foreach my $pkg ( $cad->indexed_packages() ) {
+foreach my $pkg ( $cad->indexed_distributions() ) {
     foreach my $re ( @res ) {
 	$pkg =~ $re
 	    or next;
@@ -35,20 +35,21 @@ __END__
 
 =head1 TITLE
 
-repo-grep - List all indexed packages that match one or more regexes.
+grep-distributions - List all indexed distributions that match one or more regexes.
 
 =head1 SYNOPSIS
 
- repo-grep '\.zip\z'
- repo-grep -help
- repo-grep -version
+ grep-distributions '\.zip\z'
+ grep-distributions -help
+ grep-distributions -version
 
 =head1 OPTIONS
 
 =head2 -cpan
 
 This option specifies the URL of the CPAN repository to analyze. The
-default depends on how L<CPAN::Access::AdHoc|CPAN::Access::AdHoc> is configured.
+default depends on how L<CPAN::Access::AdHoc|CPAN::Access::AdHoc> is
+configured.
 
 =head2 -help
 
@@ -63,8 +64,8 @@ This option displays the version of this script. The script then exits.
 
 This Perl script takes as its arguments one or more Perl regular
 expressions, applies those regular expressions to the names of all the
-packages in the CPAN repository, and writes the names of any matches to
-standard out.
+distributions in the CPAN repository, and writes the names of any
+matches to standard out.
 
 =head1 AUTHOR
 

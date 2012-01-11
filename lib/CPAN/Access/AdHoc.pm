@@ -8,13 +8,17 @@ use warnings;
 use Config::Tiny ();
 use CPAN::Access::AdHoc::Util;
 use CPAN::Meta;
+use Digest::SHA ();
 use File::HomeDir ();
 use File::Spec ();
+use IO::File ();
 use LWP::UserAgent ();
 use Module::Pluggable::Object;
+use Safe;
 use Text::ParseWords ();
+use URI::URL ();
 
-our $VERSION = '0.000_02';
+our $VERSION = '0.000_03';
 
 my @attributes = (
     [ config		=> \&_attr_config,	],	# Must be first
@@ -49,7 +53,7 @@ sub corpus {
 	$cpan_id;
 
     $re = qr{ \A \Q$re\E / }smx;
-    return ( grep { $_ =~ $re } $self->indexed_packages() );
+    return ( grep { $_ =~ $re } $self->indexed_distributions() );
 }
 
 {
@@ -78,6 +82,8 @@ sub corpus {
 
 	$self->_normalize_mime_info( $url, $rslt );
 
+	$self->_checksum( $rslt );
+
 	foreach my $archiver ( @archivers ) {
 	    my $archive;
 	    defined( $archive = $archiver->handle_http_response( $rslt ) )
@@ -97,9 +103,12 @@ sub fetch_author_index {
     exists $self->{_cache}{author_index}
 	and return $self->{_cache}{author_index};
 
-    my $author_details = $self->fetch( 'authors/01mailrc.txt.gz' );
+    my $author_details = $self->fetch(
+	'authors/01mailrc.txt.gz'
+    )->get_item_content();
 
-    my $fh = IO::File->new( \$author_details, '<' );
+    my $fh = IO::File->new( \$author_details, '<' )
+	or _wail( "Unable to open string reference: $!" );
 
     my %author_index;
     while ( <$fh> ) {
@@ -117,9 +126,31 @@ sub fetch_author_index {
     return ( $self->{_cache}{author_index} = \%author_index );
 }
 
+sub fetch_distribution_archive {
+    my ( $self, $distribution ) = @_;
+    my $path = _distribution_path( $distribution );
+    return $self->fetch( "authors/id/$path" );
+}
+
+sub fetch_distribution_checksums {
+    my ( $self, $distribution ) = @_;
+    $distribution =~ m{ \A ( .* / ) ( [^/]* ) \z }smx
+	or _wail( "Invalid distribution '$distribution'" );
+    my ( $dir, $file ) = ( $1, $2 );
+    $file eq 'CHECKSUMS'
+	and $file = '';
+    my $path = _distribution_path( $dir . 'CHECKSUMS' );
+    ( $dir = $path ) =~ s{ [^/]* \z }{}smx;
+    $self->{_cache}{checksums}{$dir} ||= _eval_string(
+	$self->fetch( "authors/id/$path" )->get_item_content() );
+    $file eq ''
+	and return $self->{_cache}{checksums}{$dir};
+    return $self->{_cache}{checksums}{$dir}{$file};
+}
+
 sub fetch_package_archive {
-    my ( $self, $package ) = @_;
-    return $self->fetch( "authors/id/$package" );
+    _deprecated( 'fetch_package_archive' );
+    goto &fetch_distribution_archive;
 }
 
 sub fetch_module_index {
@@ -130,7 +161,9 @@ sub fetch_module_index {
 	    @{ $self->{_cache}{module_index} } :
 	    $self->{_cache}{module_index}[0];
 
-    my $packages_details = $self->fetch( 'modules/02packages.details.txt.gz' );
+    my $packages_details = $self->fetch(
+	'modules/02packages.details.txt.gz'
+    )->get_item_content();
 
     my $fh = IO::File->new( \$packages_details, '<' )
 	or _wail( "Unable to open string reference: $!" );
@@ -144,8 +177,8 @@ sub fetch_module_index {
 ##	'undef' eq $ver
 ##	    and $ver = undef;
 	$module{$mod} = {
-	    package	=> $pkg,
-	    version	=> $ver,
+	    distribution	=> $pkg,
+	    version		=> $ver,
 	};
     }
 
@@ -162,22 +195,28 @@ sub fetch_registered_module_index {
 	    @{ $self->{_cache}{registered_module_index} } :
 	    $self->{_cache}{registered_module_index}[0];
 
-    my $packages_details = $self->fetch( 'modules/03modlist.data.gz' );
+    my $packages_details = $self->fetch(
+	'modules/03modlist.data.gz'
+    )->get_item_content();
 
-    my $fh = IO::File->new( \$packages_details, '<' )
-	or _wail( "Unable to open string reference: $!" );
+    my ( $meta, $reg );
 
-    my $meta = $self->_read_meta( $fh );
-
-    my $code;
     {
+
+	my $fh = IO::File->new( \$packages_details, '<' )
+	    or _wail( "Unable to open string reference: $!" );
+
+	$meta = $self->_read_meta( $fh );
+
 	local $/ = undef;
-	$code = <$fh>;
+	$reg = <$fh>;
     }
 
-    $self->{_cache}{registered_module_index} = [ $code, $meta ];
+    my $hash = _eval_string( "$reg\nCPAN::Modulelist->data();" );
 
-    return wantarray ? ( $code, $meta ) : $code;
+    $self->{_cache}{registered_module_index} = [ $hash, $meta ];
+
+    return wantarray ? ( $hash, $meta ) : $hash;
 }
 
 sub flush {
@@ -187,18 +226,23 @@ sub flush {
 }
 
 sub indexed_packages {
+    _deprecated( 'indexed_packages' );
+    goto &indexed_distributions;
+}
+
+sub indexed_distributions {
     my ( $self ) = @_;
-    $self->{_cache}{indexed_packages}
-	and return @{ $self->{_cache}{indexed_packages} };
+    $self->{_cache}{indexed_distributions}
+	and return @{ $self->{_cache}{indexed_distributions} };
 
     my $inx = $self->fetch_module_index();
 
     my %pkg;
     foreach my $info ( values %{ $inx } ) {
-	$pkg{$info->{package}}++;
+	$pkg{$info->{distribution}}++;
     }
 
-    return @{ $self->{_cache}{indexed_packages} = [ sort keys %pkg ] };
+    return @{ $self->{_cache}{indexed_distributions} = [ sort keys %pkg ] };
 }
 
 # Set up the accessor/mutators. All mutators interpret undef as being a
@@ -307,7 +351,50 @@ sub _attr_cpan {
 	and not $value =~ m{ / \z }smx
 	and $value .= '/';
 
+    my $old_strict = URI::URL::strict( 1 );
+    eval {
+	URI::URL->new( $value );
+	1;
+    } or do {
+	URI::URL::strict( $old_strict );
+	# We re-raise the captured exception after putting strict back
+	# the way it was. Wish there was a scope-sensitive way to make
+	# URI::URL strict.
+	die $@;
+    };
+    URI::URL::strict( $old_strict );
+
+    $self->flush();
+
     return $value;
+}
+
+# Check the file's checksum if appropriate.
+#
+# The argument is the HTTP::Response object that contains the data to
+# check. This object is expected to have its Content-Location set to the
+# path relative to the root of the site.
+#
+# Files are not checked unless they are in authors/id/, and are not
+# named CHECKSUM.
+sub _checksum {
+    my ( $self, $rslt ) = @_;
+    my $path = $rslt->header( 'Content-Location' );
+    $path =~ m{ \A authors/id/ ( [^/] ) / ( \1 [^/] ) / \2 }smx
+	or return;
+    $path =~ m{ /CHECKSUMS \z }smx
+	and return;
+    my $cks_path = $path;
+    $cks_path =~ s{ \A authors/id/ }{}smx
+	or return;
+    my $cksum = $self->fetch_distribution_checksums( $cks_path )
+	or return;
+    $cksum->{sha256}
+	or return;
+    my $got = Digest::SHA::sha256_hex( $rslt->content() );
+    $got eq $cksum->{sha256}
+	or _wail( "Checksum failure on $path" );
+    return;
 }
 
 {
@@ -334,6 +421,53 @@ sub _attr_cpan {
 	return @rslt;
     }
 
+}
+
+# Given a CPAN ID and the name of a file, compute the path to the file.
+sub _author_path {
+    my ( $author, $filename ) = @_;
+    $author = uc $author;	# CPAN IDs are all upper-case.
+    return join '/', qw{ authors id },
+	substr( $author, 0, 1 ),
+	substr( $author, 0, 2 ),
+	$author,
+	$filename;
+}
+
+# Given a distribution path relative to authors/id/, but possibly
+# missing one or both of the two levels between that and the actual
+# author directory, supply the missing stuff if it is in fact missing.
+
+sub _distribution_path {
+    my ( $path ) = @_;
+    $path =~ m{ \A ( [^/] ) / ( \1 [^/] ) / ( \2 [^/]* ) / }smx
+	and return $path;
+    $path =~ m< \A ( [^/]{2} ) / ( \1 [^/]* ) / >smx
+	and return join '/', substr( $1, 0, 1 ), $path;
+    $path =~ m< \A ( [^/]+ ) / >smx
+	and return join '/', substr( $1, 0, 1 ),
+	    substr( $1, 0, 2 ), $path;
+    _wail( "Invalid distribution path '$path'" );
+    return;	# We can't get here, but Perl::Critic does not know.
+}
+
+sub _deprecated {
+    my ( $deprec, $preferred ) = @_;
+    defined $preferred
+	or ( $preferred = $deprec ) =~ s/ package /distribution/smx;
+    _whinge( "Method $deprec is deprecated in favor of $preferred" );
+    return;
+}
+
+# Eval a string in a sandbox, and return the result. This was cribbed
+# _very_ heavily from CPAN::Distribution CHECKSUM_check_file().
+sub _eval_string {
+    my ( $string ) = @_;
+    $string =~ s/ \015? \012 /\n/smxg;
+    my $sandbox = Safe->new();
+    my $rslt = $sandbox->reval( $string );
+    $@ and _wail( $@ );
+    return $rslt;
 }
 
 # Get the repository URL from the first source that actually supplies
@@ -439,6 +573,13 @@ sub _read_meta {
     return \%meta;
 }
 
+sub _whinge {
+    my @args = @_;
+    require Carp;
+    Carp::carp( @args );
+    return;
+}
+
 sub _wail {
     my @args = @_;
     require Carp;
@@ -462,10 +603,35 @@ CPAN::Access::AdHoc - Retrieve stuff from an arbitrary CPAN repository
  my $cad = CPAN::Access::AdHoc->new();
  my $index = $cad->fetch_module_index();
  if ( $index->{$module} ) {
-     print "$module is in $index->{package}\n";
+     print "$module is in $index->{distribution}\n";
  } else {
      print "$module is not indexed\n";
  }
+
+=head1 NOTICE
+
+In C<CPAN::Access::AdHoc> version 0.000_02 and earlier, the word
+'package' was used to describe the tarball (or whatever) that CPAN
+modules came in. Beginning with this release, the word is
+'distribution', and all method names are modified accordingly. That is:
+
+=over
+
+=item fetch_package_archive becomes fetch_distribution_archive
+
+=back
+
+The old methods still work, but will issue a deprecation notice whenever
+they are called. The old methods will be removed before the first
+production release, which will be at least a week after the release of
+version 0.000_03. Yes, this is short notice, but this B<is> a
+development release, and I have not publicized this distribution.
+
+Also, in version 0.000_02 and earlier,
+L<fetch_registered_module_index()|/fetch_registered_module_index>
+returned a string that had to be C<eval>-ed to generate the index. As of
+version 0.000_03, the C<eval> is done for you, and a reference to the
+hash containing the index is returned.
 
 =head1 DESCRIPTION
 
@@ -481,11 +647,11 @@ least a configuration-optional system.
 
 Attributes can be specified explicitly either when the object is
 instantiated or afterwards. The default is from the global section of a
-L<Config::Tiny|Config::Tiny> configuration file, F<CPAN-Access-AdHoc.ini>,
-which is found in directory
-C<< File::HomeDir->my_dist_config( 'CPAN-Access-AdHoc' ) >>. The named sections
-are currently unused, though C<CPAN-Access-AdHoc> reserves to itself all
-section names which contain no uppercase letters.
+L<Config::Tiny|Config::Tiny> configuration file,
+F<CPAN-Access-AdHoc.ini>, which is found in directory
+C<< File::HomeDir->my_dist_config( 'CPAN-Access-AdHoc' ) >>. The named
+sections are currently unused, though C<CPAN-Access-AdHoc> reserves to
+itself all section names which contain no uppercase letters.
 
 In addition, it is possible to take the default CPAN repository URL from
 the user's L<CPAN::Mini|CPAN::Mini>, L<cpanm|cpanm>, L<CPAN|CPAN>, or
@@ -538,18 +704,21 @@ object.
 
 When called with an argument, this method acts as a mutator. If the
 argument is a L<Config::Tiny|Config::Tiny> object it becomes the new
-configuration. If the argument is C<undef>, file F<CPAN-Access-AdHoc.ini> in
-C<< File::HomeDir->my_dist_config( 'CPAN-Access-AdHoc' ) >> is read for the
-configuration. If this file does not exist, the configuration is set to
-an empty L<Config::Tiny|Config::Tiny> object.
+configuration. If the argument is C<undef>, file
+F<CPAN-Access-AdHoc.ini> in
+C<< File::HomeDir->my_dist_config( 'CPAN-Access-AdHoc' ) >> is read for
+the configuration. If this file does not exist, the configuration is set
+to an empty L<Config::Tiny|Config::Tiny> object.
 
 =head3 cpan
 
 When called with no arguments, this method acts as an accessor, and
 returns the URL of the CPAN repository accessed by this object.
 
-When called with an argument, this method acts as a mutator, and sets
-the URL of the CPAN repository accessed by this object.
+When called with an argument, this method acts as a mutator. It sets
+the URL of the CPAN repository accessed by this object, and (for reasons
+of sanity) calls L<flush()|/flush> to purge any data cached from the old
+repository.
 
 If the argument is C<undef>, the default URL as computed from the
 sources in L<default_cpan_source|/default_cpan_source> is used. If no
@@ -565,7 +734,7 @@ When called with an argument, this method acts as a mutator, and sets
 the list of default CPAN sources. This list is a comma-delimited string,
 and consists of the names of zero or more
 C<CPAN::Access::AdHoc::Default::CPAN::*> classes, with the common
-prefix removed.  object. See the documentation of these classes for more
+prefix removed. See the documentation of these classes for more
 information.
 
 If any of the elements in the string does not represent an existing
@@ -582,10 +751,10 @@ These methods are what all the rest is in aid of.
 
 =head3 corpus
 
-This convenience method returns a list of the indexed packages by the
-author with the given CPAN ID. This information is derived from the
-output of L<indexed_packages()|/indexed_packages>. The argument is
-converted to upper case before use.
+This convenience method returns a list of the indexed distributions by
+the author with the given CPAN ID. This information is derived from the
+output of L<indexed_distributions()|/indexed_distributions>. The
+argument is converted to upper case before use.
 
 =head3 fetch
 
@@ -603,7 +772,9 @@ with a consistent interface. These classes will be initialized with
  encoding => the MIME encoding used to decode the archive,
  path => the path to the archive, relative to the base URL.
 
-If the fetched file is not an archive, the file contents are returned.
+If the fetched file is not an archive, it is wrapped in a
+L<CPAN::Access::AdHoc::Archive::Null|CPAN::Access::AdHoc::Archive::Null>
+object and returned.
 
 All other fetch functionality is implemented in terms of this method.
 
@@ -634,8 +805,8 @@ each module is an anonymous hash with the following keys:
 
 =over
 
-=item package => the name of the package that contains the module,
-relative to the F<authors/id/> directory;
+=item distribution => the name of the distribution that contains the
+module, relative to the F<authors/id/> directory;
 
 =item version => the version of the module.
 
@@ -648,26 +819,71 @@ top of the expanded index file.
 The results of the first fetch are cached; subsequent calls are supplied
 from cache.
 
-=head3 fetch_package_archive
+=head3 fetch_distribution_archive
 
-This method takes as its argument the name of a package file relative to
-the archive's F<authors/id/> directory, and returns the package as a
-C<CPAN::Access::AdHoc::Archive::*> object.
+This method takes as its argument the name of a distribution file
+relative to the archive's F<authors/id/> directory, and returns the
+distribution as a C<CPAN::Access::AdHoc::Archive::*> object.
 
 Note that since this method is implemented in terms of
 L<fetch()|/fetch>, the archive method's C<path> attribute will be set to
 its path relative to the base URL of the CPAN repository, not its path
 relative to the F<authors/id/> directory. So, for example,
 
- $arc = $cad->fetch_package_archive( 'B/BA/BACH/PDQ-0.000_01.zip
+ $arc = $cad->fetch_distribution_archive(
+     'B/BA/BACH/PDQ-0.000_01.zip' );
  say $arc->path(); # authors/id/B/BA/BACH/PDQ-0.000_01.zip
+
+For convenience, either the top or the top two directories can be
+omitted, since they can be reconstructed from the rest. So the above
+example can also be written as
+
+ $arc = $cad->fetch_distribution_archive(
+     'BACH/PDQ-0.000_01.zip' );
+ say $arc->path(); # authors/id/B/BA/BACH/PDQ-0.000_01.zip
+
+=head3 fetch_distribution_checksums
+
+ use YAML::Any;
+ print Dump( $cad->fetch_distribution_checksums(
+     'B/BA/BACH/' ) );
+ print Dump( $cad->fetch_distribution_checksums(
+     'B/BA/BACH/Johann-0.001.tar.bz2' ) );
+
+This method takes as its argument either a file name or a directory name
+relative to F<authors/id/>. A directory is indicated by a trailing
+slash.
+
+If the request if for the F<CHECKSUMS> file, a reference the return is a
+reference to a hash which contains the interpreted contents of the
+entire file.
+
+If the argument is a file name other than F<CHECKSUMS>, the return is a
+reference to the F<CHECKSUMS> entry for that file.
+
+If the argument is a directory name, it is treated like a request for
+the F<CHECKSUMS> file in that directory.
+
+If the F<CHECKSUMS> file does not exist, an exception is raised. If the
+argument was a file name and the file has no entry in the F<CHECKSUMS>
+file, nothing is returned.
+
+For convenience, either the top or the top two directories can be
+omitted, since they can be reconstructed from the rest.
+
+The result of the first fetch for a given directory is cached, and
+subsequent calls for the same author are supplied from cache.
+
+=head3 fetch_package_archive
+
+B<This method is deprecated.> It is a synonym for
+L<fetch_distribution_archive()|/fetch_distribution_archive>.
 
 =head3 fetch_registered_module_index
 
 This method fetches the registered module index,
-F<modules/03modlist.data.gz>. It is expanded and returned as a string.
-This string, when when run through a stringy C<eval>, creates
-C<< CPAN::Modulelist->data() >>, which returns the list.
+F<modules/03modlist.data.gz>. It is interpreted, and returned as a hash
+reference keyed by module name.
 
 If called in list context, the first return is the index, and the second
 is a hash reference containing the metadata that appears at the top of
@@ -681,11 +897,16 @@ from cache.
 This method deletes all cached results, causing them to be re-fetched
 when needed.
 
-=head3 indexed_packages
+=head3 indexed_distributions
 
-This convenience method returns a list of all indexed packages in
+This convenience method returns a list of all indexed distributions in
 ASCIIbetical order. This information is derived from the results of
 L<fetch_module_index()|/fetch_module_index>, and is cached.
+
+=head3 indexed_packages
+
+B<This method is deprecated.> It is a synonym for
+L<indexed_distributions()|/indexed_distributions>.
 
 =head1 SEE ALSO
 

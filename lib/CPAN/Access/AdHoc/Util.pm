@@ -8,7 +8,7 @@ use warnings;
 use File::Find;
 use File::Spec;
 
-our $VERSION = '0.000_02';
+our $VERSION = '0.000_03';
 
 my %loaded;
 
@@ -52,8 +52,8 @@ CPAN::Access::AdHoc::Util - Utility functions for CPAN::Access::AdHoc
 
 This module provides utility functions to
 L<CPAN::Access::AdHoc|CPAN::Access::AdHoc>. It is private to the
-C<CPAN-Access-AdHoc> package. Documentation is for the benefit of the
-author only.
+C<CPAN-Access-AdHoc> distribution. Documentation is for the benefit of
+the author only.
 
 =head1 SUBROUTINES
 

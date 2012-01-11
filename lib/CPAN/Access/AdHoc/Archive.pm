@@ -5,7 +5,7 @@ use 5.008;
 use strict;
 use warnings;
 
-our $VERSION = '0.000_02';
+our $VERSION = '0.000_03';
 
 my $_attr = sub {
     my ( $self ) = @_;
@@ -55,6 +55,11 @@ sub extract {
 
 sub get_item_content {
     $_wallow->( 'The get_item_content() method must be overridden' );
+    return;	# We can't get here, but Perl::Critic does not know this
+}
+
+sub get_item_mtime {
+    $_wallow->( 'The get_item_mtime() method must be overridden' );
     return;	# We can't get here, but Perl::Critic does not know this
 }
 
@@ -148,7 +153,7 @@ This static method instantiates the object. It is actually implemented
 on the subclasses, and may not be called on this class. In use, it is
 expected that the user will not call this method directly, but get the
 archive objects from L<CPAN::Access::AdHoc|CPAN::Access::AdHoc>'s
-L<fetch_package_archive()|CPAN::Access::AdHoc/fetch_package_archive> method. See
+L<fetch_distribution_archive()|CPAN::Access::AdHoc/fetch_distribution_archive> method. See
 that method's documentation for how it initialized this object.
 
 This method takes arguments as name/value pairs. The following are
@@ -177,6 +182,9 @@ This optional argument is intended to contain the path to the archive.
 Subclasses may (but need not) default it to the value of the C<content>
 argument, provided the C<content> argument is not a reference.
 
+The intent is that the various components of this distribution should
+conspire to make this the path to the file relative to the CPAN URL.
+
 =back
 
 If you do not specify at least C<content>, you get an empty object,
@@ -189,8 +197,8 @@ These methods retrieve or modify the attributes of the class.
 =head3 archive
 
 This method is an accessor for the object representing the archive that
-actually contains the CPAN package. This attribute is read-only, so it
-is an error to pass an argument.
+actually contains the CPAN distribution. This attribute is read-only, so
+it is an error to pass an argument.
 
 =head3 path
 
@@ -205,13 +213,13 @@ consistent interface to the underlying archive object.
 
 =head3 base_directory
 
-This method returns the natural base directory of the package, as
-computed from the directories contained in the package.
+This method returns the natural base directory of the distribution, as
+computed from the directories contained in the distribution.
 
 =head3 extract
 
-This method extracts the contents of the archive. It simply wraps
-whatever the extraction method is for the underlying archiver.
+This method extracts the contents of the archive to files. It simply
+wraps whatever the extraction method is for the underlying archiver.
 
 =head3 get_item_content
 
@@ -220,14 +228,24 @@ whatever the extraction method is for the underlying archiver.
 This method returns the content of the named item in the archive. The
 name of the item is specified relative to C<< $arc->base_directory() >>.
 
+=head3 get_item_mtime
+
+ use POSIX qw{ strftime };
+ print 'README modified ', strftime(
+     '%d-%b-%Y %H:%M:%S',
+      $arc->get_item_mtime( 'README' ) ), "\n";
+
+This method returns the modification time of the named item in the
+archive. The name of the item is specified relative to
+C<< $arc->base_directory() >>.
+
 =head3 handle_http_response
 
 This static method takes as its argument an
 L<HTTP::Response|HTTP::Response> object. If this method determines that
-it can handle the response object, it does so, returning the appropriate
-datum (typically a C<CPAN::Access::AdHoc::Archive> object, though it may
-simply be a string if the response object represents the contents of a
-single file). Otherwise, it simply returns.
+it can handle the response object, it does so, returning the
+C<CPAN::Access::AdHoc::Archive> object derived from the content of the
+L<HTTP::Response|HTTP::Response> object.  Otherwise, it simply returns.
 
 The method can do anything it wants to evaluate its argument, but
 typically it examines the C<Content-Type>, C<Content-Encoding>, and
@@ -244,16 +262,16 @@ relative to C<< $self->base_directory() >>.
 
 =head3 list_items
 
-This method lists the items in the package. Only files are listed.
+This method lists the items in the distribution. Only files are listed.
 
 =head3 metadata
 
-This method returns the package's metadata as a L<CPAN::Meta|CPAN::Meta>
-object. The return of this method is the decoding of the package's
-F<META.json> or F<META.yml> files, taken in that order. If neither is
-present, or neither contains valid metadata as determined by
-L<CPAN::Meta|CPAN::Meta>, nothing is returned -- this method makes no
-further effort to establish what the metadata are.
+This method returns the distribution's metadata as a
+L<CPAN::Meta|CPAN::Meta> object. The return of this method is the
+decoding of the distribution's F<META.json> or F<META.yml> files, taken
+in that order. If neither is present, or neither contains valid metadata
+as determined by L<CPAN::Meta|CPAN::Meta>, nothing is returned -- this
+method makes no further effort to establish what the metadata are.
 
 =head1 SUPPORT
 
