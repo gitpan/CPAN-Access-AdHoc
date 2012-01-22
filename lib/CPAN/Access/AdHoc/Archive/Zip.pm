@@ -8,20 +8,11 @@ use warnings;
 use base qw{ CPAN::Access::AdHoc::Archive };
 
 use Archive::Zip;
+use CPAN::Access::AdHoc::Util qw{ :carp };
 use File::Spec::Unix ();
 use IO::File ();
 
-our $VERSION = '0.000_03';
-
-my $_attr = sub {
-    my ( $self ) = @_;
-    return ( $self->{+__PACKAGE__} ||= {} );
-};
-
-my $_wail = sub {
-    require Carp;
-    Carp::croak( @_ );
-};
+our $VERSION = '0.000_04';
 
 {
 
@@ -40,16 +31,16 @@ my $_wail = sub {
 
 	    if ( my $encoding = delete $arg{encoding} ) {
 		$decode{$encoding}
-		    or $_wail->( "Unsupported encoding '$encoding'" );
+		    or __wail( "Unsupported encoding '$encoding'" );
 		$content = $decode{$encoding}->( $content );
 	    } elsif ( ref $content ) {
 		$content = IO::File->new( $content, '<' )
-		    or $_wail->( "Unable to open string reference: $!" );
+		    or __wail( "Unable to open string reference: $!" );
 	    }
 
 	    my $status = $archive->read( $content );
 	    $status == Archive::Zip::AZ_OK()
-		or $_wail->( "Zip read error" );
+		or __wail( "Zip read error" );
 
 	    ref $content
 		or defined $arg{path}
@@ -88,7 +79,6 @@ sub base_directory {
 
 sub extract {
     my ( $self ) = @_;
-    my $attr = $_attr->( $self );
 
     $self->archive()->extractTree();
 

@@ -5,8 +5,12 @@ use warnings;
 
 use lib qw{ inc };
 
+use Config;
 use ExtUtils::MakeMaker;
 use My::Module::Meta;
+
+$Config{useperlio}
+    or die "PerlIO is required\n";
 
 (my $mmv = ExtUtils::MakeMaker->VERSION) =~ s/_//g;
 
@@ -17,7 +21,18 @@ my %args = (
     VERSION_FROM => 'lib/CPAN/Access/AdHoc.pm',
     PREREQ_PM => $meta->requires(),
     PL_FILES => {
-	'mock/src/Build_Repos.PL' => 'mock/repos',
+	'Build_Repos.PL' => [ qw{
+	    mock/repos/authors/01mailrc.txt.gz
+	    mock/repos/authors/id/B/BA/BACH/CHECKSUMS
+	    mock/repos/authors/id/B/BA/BACH/Johann-0.001.tar.bz2
+	    mock/repos/authors/id/B/BA/BACH/PDQ-0.000_01.zip
+	    mock/repos/authors/id/M/ME/MENUHIN/CHECKSUMS
+	    mock/repos/authors/id/M/ME/MENUHIN/Yehudi-0.001.tar.gz
+	    mock/repos/modules/02packages.details.txt
+	    mock/repos/modules/02packages.details.txt.gz
+	    mock/repos/modules/03modlist.data.gz
+	    mock/repos/mtimes.dat
+	    } ],
     },
     'dist' => {COMPRESS => 'gzip', SUFFIX => '.gz'},
 #   realclean => { FILES => join ' ', qw{ mock/repos/ } },

@@ -19,7 +19,7 @@ use Term::ReadLine;
 use version 0.77;
 use YAML::Any;
 
-our $VERSION = '0.000_03';
+our $VERSION = '0.000_04';
 
 use constant CURRENT_PACKAGE => 'current';
 
@@ -123,9 +123,41 @@ sub verb_checksums {
     return;
 }
 
+sub verb_choose {
+    my ( @args ) = @_;
+    @args == 1
+	or die "The choose command takes exactly one argument.\n";
+    $dist{+CURRENT_PACKAGE} = $dist{$args[0]}
+	or die "Package $args[0] not downloaded.\n";
+    return;
+}
+
 sub verb_clear {
     %dist = ();
     $cad->flush();
+    return;
+}
+
+sub verb_corpus {
+    local @ARGV = @_;
+    my %opt;
+    GetOptions( \%opt, qw{ fetch! } )
+	and @ARGV
+	or die;
+    my $inx = $cad->fetch_author_index();
+    foreach my $id ( @ARGV ) {
+	my $uc_id = uc $id;
+	if ( $inx->{$uc_id} ) {
+	    say sprintf '%-14s %s', $uc_id, $inx->{$uc_id}{address};
+	    foreach my $dist ( $cad->corpus( $uc_id ) ) {
+		say "    $dist";
+		$opt{fetch}
+		    and _fetch_distribution( $dist );
+	    }
+	} else {
+	    warn "CPAN ID $uc_id not found\n";
+	}
+    }
     return;
 }
 
@@ -379,14 +411,21 @@ sub _fetch_distribution {
     my $dn = $di->dist();
     my $dv = $di->distvname();
     my $version = version->parse( $di->version() );
-    $dist{+CURRENT_PACKAGE} = $dist{$pkg} = $dist{$dv} = {
+    $dist{+CURRENT_PACKAGE} = $dist{$pkg} = {
 	name	=> $pkg,
 	archive	=> $archive,
 	version	=> $version,
 	dist	=> $dn,
 	info	=> $di,
     };
-    $dist{$dn}
+
+    # $dv and $dn may not be defined if we are dealimg with, e.g., one
+    # of Tom Christiansen's unpackaged .pm files, say
+    # T/TO/TOMC/scripts/whenon.dir/LastLog/File.pm.gz
+    defined $dv
+	and $dist{$dv} = $dist{$pkg};
+    not defined $dn
+	or $dist{$dn}
 	and $dist{$dn}{version} > $version
 	or $dist{$dn} = $dist{$pkg};
     return;
@@ -496,9 +535,16 @@ Without an argument, it changes to the user's home directory.
 
 =head2 checksums
 
- cpan-adhoc> checksums MENUHIN
+ cpan-adhoc> checksums MENUHIN/
 
-This command displays the given author's F<CHECKSUMS> file.
+This command displays the checksums for the given directory (ending in a
+slash, as in the example) or file.
+
+=head2 choose
+
+ cpan-adhoc> choose libwww-perl
+
+This command makes the given downloaded distribution the default.
 
 =head2 clear
 
@@ -506,6 +552,16 @@ This command displays the given author's F<CHECKSUMS> file.
 
 This command removes all distributions from the stash, and purges cached
 data from the L<CPAN::Access::AdHoc|CPAN::Access::AdHoc> object.
+
+=head2 corpus
+
+ cpan-adhoc> corpus BACH
+
+This command lists all distributions in the index for the given CPAN ID.
+More than one CPAN ID can be specified. The CPAN ID is converted to
+upper case before use, so the example could equally well be written
+
+ cpan-adhoc> corpus bach
 
 =head2 cpan
 
@@ -519,16 +575,16 @@ used.
 If an argument is specified, this command sets the CPAN URL being used.
 
 If the CPAN URL was specified as C<-default>, a default value is
-computed from the current setting of C<cpan_default_source>, and that
+computed from the current setting of C<default_cpan_source>, and that
 value is both set as the current soure and displayed. If no default can
-be computed from the current C<cpan_default_source>, an error is
+be computed from the current C<default_cpan_source>, an error is
 displayed and the current setting is left unchanged.
 
-=head2 cpan_default_source
+=head2 default_cpan_source
 
- cpan-adhoc> cpan_default_source
- cpan-adhoc> cpan_default_source cpanm,CPAN
- cpan-adhoc> cpan_default_source -default
+ cpan-adhoc> default_cpan_source
+ cpan-adhoc> default_cpan_source cpanm,CPAN
+ cpan-adhoc> default_cpan_source -default
 
 If no argument is specified, this command displays the sources of
 default CPAN URLs being used.
@@ -587,13 +643,29 @@ This is a synonym for L<distribution|/distribution>, for convenience.
 This command looks up the given distribution in the module index (sic),
 using an unanchored regular expression, and displays any matches.
 
-If the C<-fetch> option is specified and exxactly one match is found,
+The following options may be specified:
+
+=over
+
+=item C<-direct>
+
+If the C<-direct> option is specified, the argument is taken to be a
+path name relative to the F<authors/id/> directory, though possibly
+without the two leftmost components. This file is fetched (if it
+exists), and no index lookup is done. The C<-fetch> option is
+irrelevant.
+
+=item C<-fetch>
+
+If the C<-fetch> option is specified and exactly one match is found,
 that distribution is fetched, and stashed locally under the name that
 appeared in the index, and under its distribution and version (e.g.
 C<libwww-perl-6.03> for the above examples).  It is also stashed under
-the distribution name if no higher version of the same distribution has
-been stashed. The last distribution fetched becomes the current
-distribution.
+the distribution name (e.g. C<libwww-perl>) if no higher version of the
+same distribution has been stashed. The last distribution fetched
+becomes the current distribution.
+
+=back
 
 =head2 exit
 

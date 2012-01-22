@@ -6,19 +6,21 @@ use strict;
 use warnings;
 
 use Config::Tiny ();
-use CPAN::Access::AdHoc::Util;
+use CPAN::Access::AdHoc::Archive;
+use CPAN::Access::AdHoc::Util qw{ :carp };
 use CPAN::Meta;
 use Digest::SHA ();
 use File::HomeDir ();
 use File::Spec ();
 use IO::File ();
+use LWP::MediaTypes ();
 use LWP::UserAgent ();
 use Module::Pluggable::Object;
 use Safe;
 use Text::ParseWords ();
 use URI::URL ();
 
-our $VERSION = '0.000_03';
+our $VERSION = '0.000_04';
 
 my @attributes = (
     [ config		=> \&_attr_config,	],	# Must be first
@@ -38,7 +40,7 @@ sub new {
     }
 
     %arg
-	and _wail( 'Unknown attribute(s): ', join ', ', sort keys %arg );
+	and __wail( 'Unknown attribute(s): ', join ', ', sort keys %arg );
 
     return $self;
 }
@@ -56,45 +58,32 @@ sub corpus {
     return ( grep { $_ =~ $re } $self->indexed_distributions() );
 }
 
-{
+sub fetch {
+    my ( $self, $path ) = @_;
 
-    my @archivers = Module::Pluggable::Object->new(
-	search_path	=> 'CPAN::Access::AdHoc::Archive',
-	inner	=> 0,
-	require	=> 1,
-    )->plugins();
+    $path =~ s{ \A / }{}smx;
 
-    sub fetch {
-	my ( $self, $path ) = @_;
+    my $ua = LWP::UserAgent->new();
 
-	$path =~ s{ \A / }{}smx;
+    my $url = $self->cpan() . $path;
 
-	my $ua = LWP::UserAgent->new();
+    my $rslt = $ua->get( $url );
 
-	my $url = $self->cpan() . $path;
+    $rslt->is_success
+	or __wail( "Failed to get $url: ", $rslt->status_line() );
 
-	my $rslt = $ua->get( $url );
+    LWP::MediaTypes::guess_media_type( $url, $rslt );
 
-	$rslt->is_success
-	    or _wail( "Failed to get $url: ", $rslt->status_line() );
+    $rslt->header( 'Content-Location' => $path );
 
-	$rslt->header( 'Content-Location' => $path );
+    $self->_checksum( $rslt );
 
-	$self->_normalize_mime_info( $url, $rslt );
+    my $archive =
+	CPAN::Access::AdHoc::Archive->handle_http_response( $rslt )
+	or __wail( sprintf q{Unsupported Content-Type '%s'},
+	$rslt->header( 'Content-Type' ) );
 
-	$self->_checksum( $rslt );
-
-	foreach my $archiver ( @archivers ) {
-	    my $archive;
-	    defined( $archive = $archiver->handle_http_response( $rslt ) )
-		and return $archive;
-	}
-
-	_wail( sprintf q{Unsupported Content-Type '%s'},
-	    $rslt->header( 'Content-Type' ) );
-
-	return;	# Can't get here, but Perl::Critic does not know this.
-    }
+    return $archive;
 }
 
 sub fetch_author_index {
@@ -108,7 +97,7 @@ sub fetch_author_index {
     )->get_item_content();
 
     my $fh = IO::File->new( \$author_details, '<' )
-	or _wail( "Unable to open string reference: $!" );
+	or __wail( "Unable to open string reference: $!" );
 
     my %author_index;
     while ( <$fh> ) {
@@ -135,7 +124,7 @@ sub fetch_distribution_archive {
 sub fetch_distribution_checksums {
     my ( $self, $distribution ) = @_;
     $distribution =~ m{ \A ( .* / ) ( [^/]* ) \z }smx
-	or _wail( "Invalid distribution '$distribution'" );
+	or __wail( "Invalid distribution '$distribution'" );
     my ( $dir, $file ) = ( $1, $2 );
     $file eq 'CHECKSUMS'
 	and $file = '';
@@ -146,11 +135,6 @@ sub fetch_distribution_checksums {
     $file eq ''
 	and return $self->{_cache}{checksums}{$dir};
     return $self->{_cache}{checksums}{$dir}{$file};
-}
-
-sub fetch_package_archive {
-    _deprecated( 'fetch_package_archive' );
-    goto &fetch_distribution_archive;
 }
 
 sub fetch_module_index {
@@ -166,7 +150,7 @@ sub fetch_module_index {
     )->get_item_content();
 
     my $fh = IO::File->new( \$packages_details, '<' )
-	or _wail( "Unable to open string reference: $!" );
+	or __wail( "Unable to open string reference: $!" );
 
     my $meta = $self->_read_meta( $fh );
 
@@ -204,7 +188,7 @@ sub fetch_registered_module_index {
     {
 
 	my $fh = IO::File->new( \$packages_details, '<' )
-	    or _wail( "Unable to open string reference: $!" );
+	    or __wail( "Unable to open string reference: $!" );
 
 	$meta = $self->_read_meta( $fh );
 
@@ -223,11 +207,6 @@ sub flush {
     my ( $self ) = @_;
     delete $self->{_cache};
     return $self;
-}
-
-sub indexed_packages {
-    _deprecated( 'indexed_packages' );
-    goto &indexed_distributions;
 }
 
 sub indexed_distributions {
@@ -292,7 +271,7 @@ foreach my $info ( @attributes ) {
 		    $value->isa( 'Config::Tiny' );
 		    1;
 		}
-		or _wail(
+		or __wail(
 		    "Attribute '$name' must be a Config::Tiny reference" );
 	# If the config file exists, read it
 	} elsif ( defined $config_path && -f $config_path ) {
@@ -379,7 +358,8 @@ sub _attr_cpan {
 # named CHECKSUM.
 sub _checksum {
     my ( $self, $rslt ) = @_;
-    my $path = $rslt->header( 'Content-Location' );
+    defined( my $path = $rslt->header( 'Content-Location' ) )
+	or return;
     $path =~ m{ \A authors/id/ ( [^/] ) / ( \1 [^/] ) / \2 }smx
 	or return;
     $path =~ m{ /CHECKSUMS \z }smx
@@ -393,7 +373,7 @@ sub _checksum {
 	or return;
     my $got = Digest::SHA::sha256_hex( $rslt->content() );
     $got eq $cksum->{sha256}
-	or _wail( "Checksum failure on $path" );
+	or __wail( "Checksum failure on $path" );
     return;
 }
 
@@ -415,23 +395,12 @@ sub _checksum {
 	my @rslt;
 	foreach my $source ( split qr{ \s* , \s* }smx, $value ) {
 	    defined( my $class = $defaulter{$source} )
-		or _wail( "Unknown default_cpan_source '$source'" );
+		or __wail( "Unknown default_cpan_source '$source'" );
 	    push @rslt, $class;
 	}
 	return @rslt;
     }
 
-}
-
-# Given a CPAN ID and the name of a file, compute the path to the file.
-sub _author_path {
-    my ( $author, $filename ) = @_;
-    $author = uc $author;	# CPAN IDs are all upper-case.
-    return join '/', qw{ authors id },
-	substr( $author, 0, 1 ),
-	substr( $author, 0, 2 ),
-	$author,
-	$filename;
 }
 
 # Given a distribution path relative to authors/id/, but possibly
@@ -445,18 +414,9 @@ sub _distribution_path {
     $path =~ m< \A ( [^/]{2} ) / ( \1 [^/]* ) / >smx
 	and return join '/', substr( $1, 0, 1 ), $path;
     $path =~ m< \A ( [^/]+ ) / >smx
-	and return join '/', substr( $1, 0, 1 ),
-	    substr( $1, 0, 2 ), $path;
-    _wail( "Invalid distribution path '$path'" );
-    return;	# We can't get here, but Perl::Critic does not know.
-}
-
-sub _deprecated {
-    my ( $deprec, $preferred ) = @_;
-    defined $preferred
-	or ( $preferred = $deprec ) =~ s/ package /distribution/smx;
-    _whinge( "Method $deprec is deprecated in favor of $preferred" );
-    return;
+	or __wail( "Invalid distribution path '$path'" );
+    return join '/', substr( $1, 0, 1 ),
+	substr( $1, 0, 2 ), $path;
 }
 
 # Eval a string in a sandbox, and return the result. This was cribbed
@@ -466,7 +426,7 @@ sub _eval_string {
     $string =~ s/ \015? \012 /\n/smxg;
     my $sandbox = Safe->new();
     my $rslt = $sandbox->reval( $string );
-    $@ and _wail( $@ );
+    $@ and __wail( $@ );
     return $rslt;
 }
 
@@ -505,53 +465,7 @@ sub _get_default_url {
 	return $url;
     }
 
-    _wail( 'No CPAN URL obtained from ' . $self->default_cpan_source() );
-
-    return;
-}
-
-# We would love to rely on the MIME info returned by the CPAN mirror,
-# but sad experience shows that these are a bit haphazard. So we compute
-# our own Content-Type and Content-Encoding based on the URL we fetched,
-# and replace those headers in the HTTP::Result with our computations.
-# The only way the original Content-Type and Content-Encoding survive is
-# if we don't overwrite them.
-#
-# The returned value is to be ignored.
-
-sub _normalize_mime_info {
-    my ( $self, $url, $rslt ) = @_;
-
-    local $_ = $url;
-
-    s/ [.] gz \z //smx
-	and $rslt->header( 'Content-Encoding' => 'gzip' )
-	or s/ [.] bz2 \z //smx
-	and $rslt->header( 'Content-Encoding' => 'x-bzip2' );
-
-    m/ [.] pm \z /smx
-	and return $rslt->header( 'Content-Type' => 'text/plain' );
-
-    m/ [.] txt \z /smx
-	and return $rslt->header( 'Content-Type' => 'text/plain' );
-
-    m/ [.] data \z /smx
-	and return $rslt->header(
-	    'Content-Type' => 'application/octet-stream' );
-
-    m/ [.] tar \z /smx
-	and return $rslt->header( 'Content-Type' => 'application/x-tar' );
-
-    m/ [.] zip \z /smx
-	and return $rslt->header( 'Content-Type' => 'application/zip' );
-
-    m/ [.] tgz \z /smx
-	and return $rslt->header(
-	'Content-Type' => 'application/x-tar',
-	'Content-Encoding' => 'gzip',
-    );
-
-    return;
+    __wail( 'No CPAN URL obtained from ' . $self->default_cpan_source() );
 }
 
 sub _read_meta {
@@ -571,19 +485,6 @@ sub _read_meta {
 	}
     }
     return \%meta;
-}
-
-sub _whinge {
-    my @args = @_;
-    require Carp;
-    Carp::carp( @args );
-    return;
-}
-
-sub _wail {
-    my @args = @_;
-    require Carp;
-    Carp::croak( @args );
 }
 
 
@@ -610,28 +511,12 @@ CPAN::Access::AdHoc - Retrieve stuff from an arbitrary CPAN repository
 
 =head1 NOTICE
 
-In C<CPAN::Access::AdHoc> version 0.000_02 and earlier, the word
-'package' was used to describe the tarball (or whatever) that CPAN
-modules came in. Beginning with this release, the word is
-'distribution', and all method names are modified accordingly. That is:
+Effective with version 0.000_03:
 
-=over
+* Methods whose names contain C<'package'> are removed. Use the
+correspondingly-named C<'distribution'> methods.
 
-=item fetch_package_archive becomes fetch_distribution_archive
-
-=back
-
-The old methods still work, but will issue a deprecation notice whenever
-they are called. The old methods will be removed before the first
-production release, which will be at least a week after the release of
-version 0.000_03. Yes, this is short notice, but this B<is> a
-development release, and I have not publicized this distribution.
-
-Also, in version 0.000_02 and earlier,
-L<fetch_registered_module_index()|/fetch_registered_module_index>
-returned a string that had to be C<eval>-ed to generate the index. As of
-version 0.000_03, the C<eval> is done for you, and a reference to the
-hash containing the index is returned.
+* Method fetch_registered_module_index() now returns a hash.
 
 =head1 DESCRIPTION
 
@@ -760,6 +645,11 @@ argument is converted to upper case before use.
 
 This method fetches the named file from the CPAN repository. Its
 argument is the name of the file relative to the root of the repository.
+
+If this method determines that there might be checksums for this file,
+it attempts to retrieve them, and if successful will compare the
+C<SHA256> checksum of the retrieved data to the retrieved value.
+
 If the file is compressed in some way it will be decompressed.
 
 If the fetched file is an archive of some sort, an object representing
@@ -854,12 +744,11 @@ This method takes as its argument either a file name or a directory name
 relative to F<authors/id/>. A directory is indicated by a trailing
 slash.
 
-If the request if for the F<CHECKSUMS> file, a reference the return is a
-reference to a hash which contains the interpreted contents of the
-entire file.
+If the request if for the F<CHECKSUMS> file, the return is a reference
+to a hash which contains the interpreted contents of the entire file.
 
 If the argument is a file name other than F<CHECKSUMS>, the return is a
-reference to the F<CHECKSUMS> entry for that file.
+reference to the F<CHECKSUMS> entry for that file, provided it exists.
 
 If the argument is a directory name, it is treated like a request for
 the F<CHECKSUMS> file in that directory.
@@ -873,11 +762,6 @@ omitted, since they can be reconstructed from the rest.
 
 The result of the first fetch for a given directory is cached, and
 subsequent calls for the same author are supplied from cache.
-
-=head3 fetch_package_archive
-
-B<This method is deprecated.> It is a synonym for
-L<fetch_distribution_archive()|/fetch_distribution_archive>.
 
 =head3 fetch_registered_module_index
 
@@ -902,11 +786,6 @@ when needed.
 This convenience method returns a list of all indexed distributions in
 ASCIIbetical order. This information is derived from the results of
 L<fetch_module_index()|/fetch_module_index>, and is cached.
-
-=head3 indexed_packages
-
-B<This method is deprecated.> It is a synonym for
-L<indexed_distributions()|/indexed_distributions>.
 
 =head1 SEE ALSO
 

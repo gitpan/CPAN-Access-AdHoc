@@ -72,6 +72,22 @@ sub ACTION_authortest {
     return;
 }
 
+sub ACTION_testcover {
+    my ( $self, @args ) = @_;
+    local @INC = @INC;
+    require lib;
+    lib->import( 'mock/cover' );
+    return $self->SUPER::ACTION_testcover( @args );
+}
+
+sub do_system {
+    my ( $self, @args ) = @_;
+    @args == 1
+	and $args[0] eq 'cover'
+	and push @args, qw{ -ignore_re \bmock/ };
+    return $self->SUPER::do_system( @args );
+}
+
 sub _get_tests_without_optional_modules {
     my @args = @_;
     my @cleanup;

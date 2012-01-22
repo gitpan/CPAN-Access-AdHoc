@@ -5,37 +5,20 @@ use 5.008;
 use strict;
 use warnings;
 
-our $VERSION = '0.000_03';
+use CPAN::Access::AdHoc::Util qw{ __attr :carp };
+use Module::Pluggable::Object;
 
-my $_attr = sub {
-    my ( $self ) = @_;
-    return ( $self->{+__PACKAGE__} ||= {} );
-};
-
-my $_wail = sub {
-    require Carp;
-    Carp::croak( @_ );
-};
-
-my $_wallow = sub {
-    require Carp;
-    Carp::confess( 'Programming error - ', @_ );
-};
-
-my $_whinge = sub {
-    require Carp;
-    Carp::carp( @_ );
-    return;
-};
+our $VERSION = '0.000_04';
 
 # Note that this can be called as a mutator, but the mutator
 # functionality is private to the invocant's class.
 sub archive {
     my ( $self, @value ) = @_;
-    my $attr = $_attr->( $self );
+    my $attr = $self->__attr();
+
     if ( @value ) {
 	caller eq ref $self
-	    or $_wail->( 'Attribute archive is read-only' );
+	    or __wail( 'Attribute archive is read-only' );
 	$attr->{archive} = $value[0];
 	return $self;
     } else {
@@ -44,38 +27,47 @@ sub archive {
 }
 
 sub base_directory {
-    $_wallow->( 'The base_directory() method must be overridden' );
-    return;	# We can't get here, but Perl::Critic does not know this
+    __weep( 'The base_directory() method must be overridden' );
 }
 
 sub extract {
-    $_wallow->( 'The extract() method must be overridden' );
-    return;	# We can't get here, but Perl::Critic does not know this
+    __weep( 'The extract() method must be overridden' );
 }
 
 sub get_item_content {
-    $_wallow->( 'The get_item_content() method must be overridden' );
-    return;	# We can't get here, but Perl::Critic does not know this
+    __weep( 'The get_item_content() method must be overridden' );
 }
 
 sub get_item_mtime {
-    $_wallow->( 'The get_item_mtime() method must be overridden' );
-    return;	# We can't get here, but Perl::Critic does not know this
+    __weep( 'The get_item_mtime() method must be overridden' );
 }
 
-sub handle_http_response {
-    $_wallow->( 'The handle() method must be overridden' );
-    return;	# We can't get here, but Perl::Critic does not know this
+{
+    my @archivers = Module::Pluggable::Object->new(
+	search_path	=> 'CPAN::Access::AdHoc::Archive',
+	inner	=> 0,
+	require	=> 1,
+    )->plugins();
+
+    sub handle_http_response {
+	my ( $class, $resp ) = @_;
+
+	foreach my $archiver ( @archivers ) {
+	    my $archive;
+	    defined( $archive = $archiver->handle_http_response( $resp ) )
+		and return $archive;
+	}
+
+	return;
+    }
 }
 
 sub item_present {
-    $_wallow->( 'The item_present() method must be overridden' );
-    return;	# We can't get here, but Perl::Critic does not know this
+    __weep( 'The item_present() method must be overridden' );
 }
 
 sub list_items {
-    $_wallow->( 'The list_items() method must be overridden' );
-    return;	# We can't get here, but Perl::Critic does not know this
+    __weep( 'The list_items() method must be overridden' );
 }
 
 sub metadata {
@@ -93,7 +85,7 @@ sub metadata {
 	    $meta = CPAN::Meta->$method(
 		$self->get_item_content( $file ) );
 	} or do {
-	    $_whinge->( "CPAN::Meta->$method() failed: $@" );
+	    __whinge( "CPAN::Meta->$method() failed: $@" );
 	    next;
 	};
 	return $meta;
@@ -108,10 +100,11 @@ sub metadata {
 # functionality is private to the invocant's class.
 sub path {
     my ( $self, @value ) = @_;
-    my $attr = $_attr->( $self );
+    my $attr = $self->__attr();
+
     if ( @value ) {
 	caller eq ref $self
-	    or $_wail->( 'Attribute path is read-only' );
+	    or __wail( 'Attribute path is read-only' );
 	$attr->{path} = $value[0];
 	return $self;
     } else {
@@ -168,13 +161,20 @@ assumed to be the literal content. A non-reference is assumed to be the
 file name. Any other value is unsupported.
 
 Passing content to a subclass that is not designed to support that
-content is unsupported.
+content is unsupported. That is to say, if you pass the contents of a
+C<Zip> file to C<< CPAN::Access::AdHoc::Archive::Tar->new() >>, nothing
+good will happen.
 
 =item encoding
 
 This is the MIME encoding of the content. It is ignored if the content
-is not present. Subclasses are expected to support encodings C<'gzip'>
-and C<'x-bzip2'>.
+is not present. If the content is not encoded, this argument can be
+omitted or passed a value of C<undef>.
+
+Subclasses are expected to support encodings C<'gzip'> and C<'x-bzip2'>.
+
+Again, nothing good will happen if the content is not actually encoded
+this way.
 
 =item path
 
@@ -245,11 +245,20 @@ This static method takes as its argument an
 L<HTTP::Response|HTTP::Response> object. If this method determines that
 it can handle the response object, it does so, returning the
 C<CPAN::Access::AdHoc::Archive> object derived from the content of the
-L<HTTP::Response|HTTP::Response> object.  Otherwise, it simply returns.
+L<HTTP::Response|HTTP::Response> object. Otherwise, it simply returns.
 
 The method can do anything it wants to evaluate its argument, but
 typically it examines the C<Content-Type>, C<Content-Encoding>, and
-C<Content-Location> headers.
+C<Content-Location> headers. The expected values of these headers are
+those loaded by C<LWP::MediaTypes::guess_media_type()>.
+
+For this class (i.e. C<CPAN::Access::AdHoc::Archive>, the method simply
+calls C<handle_http_response()> on all the
+C<CPAN::Access::AdHoc::Archive::*> classes until one chooses to handle
+the L<HTTP::Response|HTTP::Response> object by returning a
+C<CPAN::Access::AdHoc::Archive> object. If none of the subclasses
+handles the L<HTTP::Response|HTTP::Response> object, nothing is
+returned.
 
 =head3 item_present
 

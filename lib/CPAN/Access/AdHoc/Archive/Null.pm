@@ -7,6 +7,7 @@ use warnings;
 
 use base qw{ CPAN::Access::AdHoc::Archive };
 
+use CPAN::Access::AdHoc::Util qw{ :carp };
 use File::Path 2.07 ();
 use File::Spec ();
 use HTTP::Date ();
@@ -14,17 +15,7 @@ use IO::File ();
 use IO::Uncompress::Bunzip2 ();
 use IO::Uncompress::Gunzip ();
 
-our $VERSION = '0.000_03';
-
-my $_attr = sub {
-    my ( $self ) = @_;
-    return ( $self->{+__PACKAGE__} ||= {} );
-};
-
-my $_wail = sub {
-    require Carp;
-    Carp::croak( @_ );
-};
+our $VERSION = '0.000_04';
 
 my %decode = (
     gzip	=> sub {
@@ -46,22 +37,24 @@ sub new {
     my ( $class, %arg ) = @_;
 
     my $self = bless {}, ref $class || $class;
-    my $attr = $_attr->( $self );
+    my $attr = $self->__attr();
+
+    ref $arg{content}
+	or defined $arg{path}
+	or $arg{path} = $arg{content};
 
     if ( defined( my $content = delete $arg{content} ) ) {
 
 	my $mtime = delete $arg{mtime};
 
-	my $file_name = ref $content ? 'unknown' : $content;
-
 	if ( my $encoding = delete $arg{encoding} ) {
 	    $decode{$encoding}
-		or $_wail->( "Unsupported encoding '$encoding'" );
+		or __wail( "Unsupported encoding '$encoding'" );
 	    $content = $decode{$encoding}->( $content );
 	} elsif ( ! ref $content ) {
 	    local $/ = undef;	# Slurp mode
 	    open my $fh, '<', $content
-		or $_wail->( "Unable to open $content: $!" );
+		or __wail( "Unable to open $content: $!" );
 	    my @stat = stat $fh;
 	    $content = <$fh>;
 	    close $fh;
@@ -71,16 +64,24 @@ sub new {
 	    $content = ${ $content };
 	}
 
+	my ( $base_dir, $file_name );
+	if ( $arg{path} ) {
+	    ( undef, $base_dir, $file_name ) =
+		File::Spec->splitpath( $arg{path} );
+	    $base_dir =~ s{ \A authors/id/
+		([^/]) / ( \1 [^/] ) / \2 [^/]* / }{}smx;
+	    $file_name =~ s/ [.] (?: gz | bz2 ) \z //smx;
+	} else {
+	    ( $base_dir, $file_name ) = ( '', 'unknown' );
+	}
+
+	$attr->{base_dir} = $base_dir;
 	$attr->{contents}{$file_name} = {
 	    content	=> $content,
 	    mtime	=> $mtime,
 	};
 
 	$self->archive( undef );
-
-	ref $content
-	    or defined $arg{path}
-	    or $arg{path} = $content;
 
     }
 
@@ -90,17 +91,35 @@ sub new {
 }
 
 sub base_directory {
-    return '';
+    my ( $self ) = @_;
+    my $attr = $self->__attr();
+
+    return $attr->{base_dir};
 }
 
 sub extract {
     my ( $self ) = @_;
-    my $attr = $_attr->( $self );
+    my $attr = $self->__attr();
+
+    my @dirs = grep { defined $_ and '' ne $_ } File::Spec->splitdir(
+	$self->base_directory() );
+    my $where;
+    foreach my $dir ( @dirs ) {
+	$where = defined $where ? File::Spec->catdir( $where, $dir ) :
+	$dir;
+	-d $where
+	    or mkdir $where
+	    or __wail( "Unable to mkdir $where: $!" );
+    }
 
     foreach my $name ( keys %{ $attr->{contents} } ) {
-	my $fh = IO::File->new( $name, '>' )
-	    or $_wail->( "Unable to open $name for output: $!" );
+	my $path = File::Spec->catfile( $where, $name );
+	my $fh = IO::File->new( $path, '>' )
+	    or __wail( "Unable to open $path for output: $!" );
 	print { $fh } $attr->{contents}{$name}{content};
+	close $fh;
+	my $mtime = $attr->{contents}{$name}{mtime};
+	utime $mtime, $mtime, $path;
     }
 
     return $self;
@@ -108,26 +127,20 @@ sub extract {
 
 sub get_item_content {
     my ( $self, $file ) = @_;
-    my $attr = $_attr->( $self );
+    my $attr = $self->__attr();
 
-    if ( defined $file ) {
-	$file = $self->base_directory() . $file;
-    } else {
-	( $file ) = keys %{ $attr->{contents} };
-    }
+    defined $file
+	or ( $file ) = keys %{ $attr->{contents} };
 
     return $attr->{contents}{$file}{content};
 }
 
 sub get_item_mtime {
     my ( $self, $file ) = @_;
-    my $attr = $_attr->( $self );
+    my $attr = $self->__attr();
 
-    if ( defined $file ) {
-	$file = $self->base_directory() . $file;
-    } else {
-	( $file ) = keys %{ $attr->{contents} };
-    }
+    defined $file
+	or ( $file ) = keys %{ $attr->{contents} };
 
     return $attr->{contents}{$file}{mtime};
 }
@@ -160,28 +173,16 @@ sub get_item_mtime {
 
 sub item_present {
     my ( $self, $item ) = @_;
+    my $attr = $self->__attr();
 
-    $item = $self->base_directory() . $item;
-
-    my $attr = $_attr->( $self );
     return defined $attr->{contents}{$item};
 }
 
 sub list_contents {
     my ( $self ) = @_;
-    my $attr = $_attr->( $self );
+    my $attr = $self->__attr();
 
-    my $re = $self->base_directory();
-    $re = qr{ \A \Q$re\E }smx;
-
-    my @rslt;
-    foreach my $file ( sort keys %{ $attr->{content} } ) {
-	$file =~ s/ $re //smx
-	    or next;
-	push @rslt, $file;
-    }
-
-    return @rslt;
+    return ( sort keys %{ $attr->{contents} } );
 }
 
 1;
@@ -249,6 +250,29 @@ the content argument.
 
 =back
 
+=head2 base_directory
+
+Because there is no real distribution inside this wrapper, we have no
+real place to get a base directory. So we have to invent one.
+
+For files that appear to be single-file unpackaged distributions (that
+is, with paths like
+F<authors/id/T/TO/TOMC/scripts/whenon.dir/LastLog/File.pm.gz>), the base
+directory is taken to be the directory portion of the path which is to
+the right of the author directory; that is,
+F<scripts/whenon.dir/LastLog/> in the above example.
+
+For other files, the base directory is simply the directory portion of
+the file path relative to the base of the CPAN mirror.
+
+=head2 extract
+
+Because there is no real distribution inside this wrapper, we have to do
+our own extract functionality.
+
+This simply creates the base directory tree and then extracts the file
+into it.
+
 =head2 get_item_content
 
 This method returns the content of the named item in the archive.
@@ -258,9 +282,7 @@ argument is C<undef>, the content of that file is returned.
 =head2 list_contents
 
 This method lists the contents of the archive. It always returns exactly
-one name, which will be C<'unknown'> if the the object was initialized
-with C<< content => \$scalar >>.
-
+one name.
 
 =head1 SUPPORT
 

@@ -4,7 +4,7 @@
       "Tom Wyant (wyant at cpan dot org)"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "Module::Build version 0.38, CPAN::Meta::Converter version 2.113640",
+   "generated_by" : "Module::Build version 0.3901, CPAN::Meta::Converter version 2.113640",
    "license" : [
       "perl_5"
    ],
@@ -52,10 +52,12 @@
             "IO::File" : 0,
             "IO::Uncompress::Bunzip2" : 0,
             "IO::Uncompress::Gunzip" : 0,
+            "LWP::MediaTypes" : 0,
             "LWP::UserAgent" : 0,
             "Module::Pluggable::Object" : 0,
             "Safe" : 0,
             "Text::ParseWords" : 0,
+            "Time::Local" : 0,
             "URI::URL" : 0,
             "base" : 0,
             "perl" : "5.008",
@@ -67,43 +69,43 @@
    "provides" : {
       "CPAN::Access::AdHoc" : {
          "file" : "lib/CPAN/Access/AdHoc.pm",
-         "version" : "0.000_03"
+         "version" : "0.000_04"
       },
       "CPAN::Access::AdHoc::Archive" : {
          "file" : "lib/CPAN/Access/AdHoc/Archive.pm",
-         "version" : "0.000_03"
+         "version" : "0.000_04"
       },
       "CPAN::Access::AdHoc::Archive::Null" : {
          "file" : "lib/CPAN/Access/AdHoc/Archive/Null.pm",
-         "version" : "0.000_03"
+         "version" : "0.000_04"
       },
       "CPAN::Access::AdHoc::Archive::Tar" : {
          "file" : "lib/CPAN/Access/AdHoc/Archive/Tar.pm",
-         "version" : "0.000_03"
+         "version" : "0.000_04"
       },
       "CPAN::Access::AdHoc::Archive::Zip" : {
          "file" : "lib/CPAN/Access/AdHoc/Archive/Zip.pm",
-         "version" : "0.000_03"
+         "version" : "0.000_04"
       },
       "CPAN::Access::AdHoc::Default::CPAN::CPAN" : {
          "file" : "lib/CPAN/Access/AdHoc/Default/CPAN/CPAN.pm",
-         "version" : "0.000_03"
+         "version" : "0.000_04"
       },
       "CPAN::Access::AdHoc::Default::CPAN::CPAN::Mini" : {
          "file" : "lib/CPAN/Access/AdHoc/Default/CPAN/CPAN/Mini.pm",
-         "version" : "0.000_03"
+         "version" : "0.000_04"
       },
       "CPAN::Access::AdHoc::Default::CPAN::CPANPLUS" : {
          "file" : "lib/CPAN/Access/AdHoc/Default/CPAN/CPANPLUS.pm",
-         "version" : "0.000_03"
+         "version" : "0.000_04"
       },
       "CPAN::Access::AdHoc::Default::CPAN::cpanm" : {
          "file" : "lib/CPAN/Access/AdHoc/Default/CPAN/cpanm.pm",
-         "version" : "0.000_03"
+         "version" : "0.000_04"
       },
       "CPAN::Access::AdHoc::Util" : {
          "file" : "lib/CPAN/Access/AdHoc/Util.pm",
-         "version" : "0.000_03"
+         "version" : "0.000_04"
       }
    },
    "release_status" : "testing",
@@ -115,5 +117,5 @@
          "http://dev.perl.org/licenses/"
       ]
    },
-   "version" : "0.000_03"
+   "version" : "0.000_04"
 }
