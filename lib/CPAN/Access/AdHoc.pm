@@ -13,14 +13,13 @@ use Digest::SHA ();
 use File::HomeDir ();
 use File::Spec ();
 use IO::File ();
-use LWP::MediaTypes ();
 use LWP::UserAgent ();
 use Module::Pluggable::Object;
 use Safe;
 use Text::ParseWords ();
 use URI::URL ();
 
-our $VERSION = '0.000_04';
+our $VERSION = '0.000_05';
 
 my @attributes = (
     [ config		=> \&_attr_config,	],	# Must be first
@@ -72,9 +71,7 @@ sub fetch {
     $rslt->is_success
 	or __wail( "Failed to get $url: ", $rslt->status_line() );
 
-    LWP::MediaTypes::guess_media_type( $url, $rslt );
-
-    $rslt->header( 'Content-Location' => $path );
+    CPAN::Access::AdHoc::Archive->guess_media_type( $rslt, $path );
 
     $self->_checksum( $rslt );
 

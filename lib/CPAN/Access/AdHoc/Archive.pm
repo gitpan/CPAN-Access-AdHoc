@@ -6,9 +6,10 @@ use strict;
 use warnings;
 
 use CPAN::Access::AdHoc::Util qw{ __attr :carp };
+use LWP::MediaTypes ();
 use Module::Pluggable::Object;
 
-our $VERSION = '0.000_04';
+our $VERSION = '0.000_05';
 
 # Note that this can be called as a mutator, but the mutator
 # functionality is private to the invocant's class.
@@ -40,6 +41,24 @@ sub get_item_content {
 
 sub get_item_mtime {
     __weep( 'The get_item_mtime() method must be overridden' );
+}
+
+sub guess_media_type {
+    my ( $class, $resp, $path ) = @_;
+
+    if ( defined $path ) {
+	$resp->header( 'Content-Location' => $path );
+    } else {
+	defined( $path = $resp->header( 'Content-Location' ) )
+	    or __wail( 'No path provided, and none in Content-Location' );
+    }
+
+    # LWP::MediaTypes needs help with some paths.
+    $path =~ s/ [.] tgz \z /.tar.gz/smxi;
+
+    LWP::MediaTypes::guess_media_type( $path, $resp );
+
+    return;
 }
 
 {
@@ -239,6 +258,32 @@ This method returns the modification time of the named item in the
 archive. The name of the item is specified relative to
 C<< $arc->base_directory() >>.
 
+=head3 guess_media_type
+
+ CPAN::Access::AdHoc::Archive->guess_media_type( $resp, $path );
+
+This static method guesses the media type and encoding.
+
+The first argument is an L<HTTP::Response|HTTP::Response> object such as
+would have been returned by a successful fetch of the data. The second
+argument is optional, and is the URL or path used to fetch the data. If
+the second argument is defined, it sets the C<Content-Location> header
+in C<$resp>.  If C<$path> is not defined, it defaults to
+C<< $resp->header( 'Content-Location' ) >>, and an exception is thrown
+if there is none.
+
+The method loads the C<Content-Type> and C<Content-Encoding> headers of
+the C<$resp> object with its best guess at what they are. Nothing is
+returned.
+
+Note that the arguments are reversed from
+C<LWP::MediaTypes::guess_media_type()>.
+
+The whole C<guess_media_type()>/C<handle_http_response()> thing seems
+like a crock to me, but I have not been able to think of anything
+better. If they make it into a production release, they B<will> go
+through a deprecation cycle.
+
 =head3 handle_http_response
 
 This static method takes as its argument an
@@ -252,13 +297,18 @@ typically it examines the C<Content-Type>, C<Content-Encoding>, and
 C<Content-Location> headers. The expected values of these headers are
 those loaded by C<LWP::MediaTypes::guess_media_type()>.
 
-For this class (i.e. C<CPAN::Access::AdHoc::Archive>, the method simply
+For this class (i.e. C<CPAN::Access::AdHoc::Archive>), the method simply
 calls C<handle_http_response()> on all the
 C<CPAN::Access::AdHoc::Archive::*> classes until one chooses to handle
 the L<HTTP::Response|HTTP::Response> object by returning a
 C<CPAN::Access::AdHoc::Archive> object. If none of the subclasses
 handles the L<HTTP::Response|HTTP::Response> object, nothing is
 returned.
+
+The whole C<guess_media_type()>/C<handle_http_response()> thing seems
+like a crock to me, but I have not been able to think of anything
+better. If they make it into a production release, they B<will> go
+through a deprecation cycle.
 
 =head3 item_present
 
