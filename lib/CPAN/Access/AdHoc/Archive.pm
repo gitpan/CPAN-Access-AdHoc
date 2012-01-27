@@ -5,11 +5,14 @@ use 5.008;
 use strict;
 use warnings;
 
-use CPAN::Access::AdHoc::Util qw{ __attr :carp };
-use LWP::MediaTypes ();
+use CPAN::Access::AdHoc::Util qw{
+    __attr __expand_distribution_path __guess_media_type :carp
+};
+use CPAN::Meta ();
+use HTTP::Response ();
 use Module::Pluggable::Object;
 
-our $VERSION = '0.000_05';
+our $VERSION = '0.000_06';
 
 # Note that this can be called as a mutator, but the mutator
 # functionality is private to the invocant's class.
@@ -46,17 +49,13 @@ sub get_item_mtime {
 sub guess_media_type {
     my ( $class, $resp, $path ) = @_;
 
-    if ( defined $path ) {
-	$resp->header( 'Content-Location' => $path );
-    } else {
-	defined( $path = $resp->header( 'Content-Location' ) )
-	    or __wail( 'No path provided, and none in Content-Location' );
-    }
+    __whinge( join ' ',
+	'CPAN::Access::AdHoc::Archive::guess_media_type() is',
+	'deprecated in favor of',
+	'CPAN::Access::AdHoc::Util::__guess_media_type()'
+    );
 
-    # LWP::MediaTypes needs help with some paths.
-    $path =~ s/ [.] tgz \z /.tar.gz/smxi;
-
-    LWP::MediaTypes::guess_media_type( $path, $resp );
+    __guess_media_type( $resp, $path );
 
     return;
 }
@@ -69,11 +68,19 @@ sub guess_media_type {
     )->plugins();
 
     sub handle_http_response {
+	__whinge( join ' ',
+	    'handle_http_response() is deprecated in favor of',
+	    '__handle_http_response()',
+	);
+	goto &__handle_http_response;
+    }
+
+    sub __handle_http_response {
 	my ( $class, $resp ) = @_;
 
 	foreach my $archiver ( @archivers ) {
 	    my $archive;
-	    defined( $archive = $archiver->handle_http_response( $resp ) )
+	    defined( $archive = $archiver->__handle_http_response( $resp ) )
 		and return $archive;
 	}
 
@@ -131,6 +138,41 @@ sub path {
     }
 }
 
+sub wrap_archive {
+    my ( $self, $fn, $author_dir ) = @_;
+    -f $fn
+	or __wail( "File $fn not found" );
+    my $content;
+    {
+	local $/ = undef;
+	open my $fh, '<', $fn or __wail( "Unable to open $fn: $!" );
+	binmode $fh;
+	$content = <$fh>;
+	close $fh;
+    }
+    my $path;
+    if ( defined $author_dir ) {
+	my $author_path = __expand_distribution_path( $author_dir );
+	$author_path =~ s{ / \z }{}smx;
+	$path = join '/', 'authors/id', $author_path,
+	    ( File::Spec->splitpath( $fn ) )[2];
+    } else {
+	my ( $dev, $dir, $base ) = File::Spec->splitpath( $fn );
+	my @dirs = grep { $_ ne '' } File::Spec->splitdir( $dir );
+	@dirs
+	    or @dirs = grep { $_ ne '' } Cwd::cwd();
+	if ( @dirs ) {
+	    $path = join '/', 'authors/id', __expand_distribution_path(
+		"$dirs[-1]/$base" );
+	} else {
+	    $path = $fn;
+	}
+    }
+    my $resp = HTTP::Response->new( 200, 'OK', undef, $content );
+    __guess_media_type( $resp, $path );
+    return $self->__handle_http_response( $resp );
+}
+
 1;
 
 __END__
@@ -142,6 +184,27 @@ CPAN::Access::AdHoc::Archive - Common archive functionality for CPAN::Access::Ad
 =head1 SYNOPSIS
 
 This class is not intended to be used directly.
+
+=head1 NOTICE
+
+Effective with version 0.000_06:
+
+* Static method C<__guess_media_type()> is deprecated. The code has been
+moved to C<CPAN::Access::AdHoc::Util> as subroutine
+C<__guess_media_type()>, which is private to the C<CPAN-Access-AdHoc>
+package.
+
+* Static method C<handle_http_response()> is deprecated. The code has
+been renamed to C<__handle_http_response()>, and is considered private
+to the C<CPAN-Access-AdHoc> package.
+
+Because the deprecated methods have never been in a production release,
+they will be removed a week after the publication of version 0.000_06.
+
+I have never been real happy about exposing these in the public
+interface, and with the writing of
+C<< CPAN::Access::AdHoc::Archive->wrap_archive() >>, the need to expose
+them appears to me to have gone away.
 
 =head1 DESCRIPTION
 
@@ -262,35 +325,26 @@ C<< $arc->base_directory() >>.
 
  CPAN::Access::AdHoc::Archive->guess_media_type( $resp, $path );
 
-This static method guesses the media type and encoding.
+This static method is deprecated. It is a wrapper for
+C<CPAN::Access::AdHoc::__guess_media_type()>.
 
-The first argument is an L<HTTP::Response|HTTP::Response> object such as
-would have been returned by a successful fetch of the data. The second
-argument is optional, and is the URL or path used to fetch the data. If
-the second argument is defined, it sets the C<Content-Location> header
-in C<$resp>.  If C<$path> is not defined, it defaults to
-C<< $resp->header( 'Content-Location' ) >>, and an exception is thrown
-if there is none.
-
-The method loads the C<Content-Type> and C<Content-Encoding> headers of
-the C<$resp> object with its best guess at what they are. Nothing is
-returned.
-
-Note that the arguments are reversed from
-C<LWP::MediaTypes::guess_media_type()>.
-
-The whole C<guess_media_type()>/C<handle_http_response()> thing seems
-like a crock to me, but I have not been able to think of anything
-better. If they make it into a production release, they B<will> go
-through a deprecation cycle.
+Because this method has never appeared in a production release, it will
+be removed a week after the next release, which will be a development
+release.
 
 =head3 handle_http_response
 
-This static method takes as its argument an
-L<HTTP::Response|HTTP::Response> object. If this method determines that
-it can handle the response object, it does so, returning the
-C<CPAN::Access::AdHoc::Archive> object derived from the content of the
-L<HTTP::Response|HTTP::Response> object. Otherwise, it simply returns.
+This static method is deprecated in favor of __handle_http_response().
+
+=head3 __handle_http_response
+
+This static method is private to the C<CPAN-Access-AdHoc> package.
+
+This method takes as its argument an L<HTTP::Response|HTTP::Response>
+object. If this method determines that it can handle the response
+object, it does so, returning the C<CPAN::Access::AdHoc::Archive> object
+derived from the content of the L<HTTP::Response|HTTP::Response> object.
+Otherwise, it simply returns.
 
 The method can do anything it wants to evaluate its argument, but
 typically it examines the C<Content-Type>, C<Content-Encoding>, and
@@ -298,14 +352,14 @@ C<Content-Location> headers. The expected values of these headers are
 those loaded by C<LWP::MediaTypes::guess_media_type()>.
 
 For this class (i.e. C<CPAN::Access::AdHoc::Archive>), the method simply
-calls C<handle_http_response()> on all the
+calls C<__handle_http_response()> on all the
 C<CPAN::Access::AdHoc::Archive::*> classes until one chooses to handle
 the L<HTTP::Response|HTTP::Response> object by returning a
 C<CPAN::Access::AdHoc::Archive> object. If none of the subclasses
 handles the L<HTTP::Response|HTTP::Response> object, nothing is
 returned.
 
-The whole C<guess_media_type()>/C<handle_http_response()> thing seems
+The whole C<guess_media_type()>/C<__handle_http_response()> thing seems
 like a crock to me, but I have not been able to think of anything
 better. If they make it into a production release, they B<will> go
 through a deprecation cycle.
@@ -331,6 +385,17 @@ decoding of the distribution's F<META.json> or F<META.yml> files, taken
 in that order. If neither is present, or neither contains valid metadata
 as determined by L<CPAN::Meta|CPAN::Meta>, nothing is returned -- this
 method makes no further effort to establish what the metadata are.
+
+=head2 wrap_archive
+
+ my $archive = CPAN::Access::AdHoc::Archive->wrap_archive(
+     'foo/MyDistrib-0.001.tar.gz', 'MYCPANID' );
+
+This method (either normal or static) makes a
+C<CPAN::Access::AdHoc::Archive> object out of a local file, and returns
+it. The second argument is the CPAN ID to assign to the archive. If this
+is omitted the directory the file is in will provide the CPAN ID, which
+is probably not what you want.
 
 =head1 SUPPORT
 

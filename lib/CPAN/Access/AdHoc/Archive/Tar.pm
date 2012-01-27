@@ -14,7 +14,7 @@ use IO::File ();
 use IO::Uncompress::Bunzip2 ();
 use IO::Uncompress::Gunzip ();
 
-our $VERSION = '0.000_05';
+our $VERSION = '0.000_06';
 
 {
 
@@ -115,6 +115,14 @@ sub get_item_mtime {
     my %handled = map { $_ => 1 } qw{ application/x-tar };
 
     sub handle_http_response {
+	__whinge( join ' ',
+	    'handle_http_response() is deprecated in favor of',
+	    '__handle_http_response()',
+	);
+	goto &__handle_http_response;
+    }
+
+    sub __handle_http_response {
 	my ( $class, $rslt ) = @_;
 
 	$handled{ $rslt->header( 'Content-Type' ) }

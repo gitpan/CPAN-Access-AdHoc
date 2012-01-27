@@ -7,19 +7,21 @@ use warnings;
 
 use Config::Tiny ();
 use CPAN::Access::AdHoc::Archive;
-use CPAN::Access::AdHoc::Util qw{ :carp };
-use CPAN::Meta;
+use CPAN::Access::AdHoc::Util qw{
+    :carp __expand_distribution_path __guess_media_type
+};
 use Digest::SHA ();
 use File::HomeDir ();
 use File::Spec ();
 use IO::File ();
 use LWP::UserAgent ();
+use LWP::Protocol ();
 use Module::Pluggable::Object;
 use Safe;
 use Text::ParseWords ();
-use URI::URL ();
+use URI ();
 
-our $VERSION = '0.000_05';
+our $VERSION = '0.000_06';
 
 my @attributes = (
     [ config		=> \&_attr_config,	],	# Must be first
@@ -71,12 +73,12 @@ sub fetch {
     $rslt->is_success
 	or __wail( "Failed to get $url: ", $rslt->status_line() );
 
-    CPAN::Access::AdHoc::Archive->guess_media_type( $rslt, $path );
+    __guess_media_type( $rslt, $path );
 
     $self->_checksum( $rslt );
 
     my $archive =
-	CPAN::Access::AdHoc::Archive->handle_http_response( $rslt )
+	CPAN::Access::AdHoc::Archive->__handle_http_response( $rslt )
 	or __wail( sprintf q{Unsupported Content-Type '%s'},
 	$rslt->header( 'Content-Type' ) );
 
@@ -114,7 +116,7 @@ sub fetch_author_index {
 
 sub fetch_distribution_archive {
     my ( $self, $distribution ) = @_;
-    my $path = _distribution_path( $distribution );
+    my $path = __expand_distribution_path( $distribution );
     return $self->fetch( "authors/id/$path" );
 }
 
@@ -125,7 +127,7 @@ sub fetch_distribution_checksums {
     my ( $dir, $file ) = ( $1, $2 );
     $file eq 'CHECKSUMS'
 	and $file = '';
-    my $path = _distribution_path( $dir . 'CHECKSUMS' );
+    my $path = __expand_distribution_path( $dir . 'CHECKSUMS' );
     ( $dir = $path ) =~ s{ [^/]* \z }{}smx;
     $self->{_cache}{checksums}{$dir} ||= _eval_string(
 	$self->fetch( "authors/id/$path" )->get_item_content() );
@@ -317,28 +319,26 @@ sub _attr_literal {
 # Compute the value of the cpan attribute. The actual computation of the
 # default URL is outsourced to _get_default_url(). The attribute needs a
 # trailing slash so we can just slap the path on the end of it.
+
 sub _attr_cpan {
     my ( $self, $name, $value ) = @_;
 
     defined $value
 	or $value = $self->_get_default_url();
 
-    defined $value
-	and not $value =~ m{ / \z }smx
-	and $value .= '/';
+    $value = "$value";	# Stringify
+    $value =~ s{ (?<! / ) \z }{/}smx;
 
-    my $old_strict = URI::URL::strict( 1 );
-    eval {
-	URI::URL->new( $value );
-	1;
-    } or do {
-	URI::URL::strict( $old_strict );
-	# We re-raise the captured exception after putting strict back
-	# the way it was. Wish there was a scope-sensitive way to make
-	# URI::URL strict.
-	die $@;
-    };
-    URI::URL::strict( $old_strict );
+    my $url = URI->new( $value )
+	or _wail( "Bad URL '$value'" );
+    {
+	my $scheme = $url->scheme();
+	my $ua = LWP::UserAgent->new();
+	$url->can( 'authority' )
+	    and LWP::Protocol::implementor( $scheme )
+	    or __wail ( "URL scheme $scheme: is unsupported" );
+    }
+    $value = $url;
 
     $self->flush();
 
@@ -353,6 +353,7 @@ sub _attr_cpan {
 #
 # Files are not checked unless they are in authors/id/, and are not
 # named CHECKSUM.
+
 sub _checksum {
     my ( $self, $rslt ) = @_;
     defined( my $path = $rslt->header( 'Content-Location' ) )
@@ -373,6 +374,9 @@ sub _checksum {
 	or __wail( "Checksum failure on $path" );
     return;
 }
+
+# Expand the default_cpan_source attribute into a list of class names,
+# each implementing one of the listed defaults.
 
 {
 
@@ -398,22 +402,6 @@ sub _checksum {
 	return @rslt;
     }
 
-}
-
-# Given a distribution path relative to authors/id/, but possibly
-# missing one or both of the two levels between that and the actual
-# author directory, supply the missing stuff if it is in fact missing.
-
-sub _distribution_path {
-    my ( $path ) = @_;
-    $path =~ m{ \A ( [^/] ) / ( \1 [^/] ) / ( \2 [^/]* ) / }smx
-	and return $path;
-    $path =~ m< \A ( [^/]{2} ) / ( \1 [^/]* ) / >smx
-	and return join '/', substr( $1, 0, 1 ), $path;
-    $path =~ m< \A ( [^/]+ ) / >smx
-	or __wail( "Invalid distribution path '$path'" );
-    return join '/', substr( $1, 0, 1 ),
-	substr( $1, 0, 2 ), $path;
 }
 
 # Eval a string in a sandbox, and return the result. This was cribbed
@@ -465,6 +453,12 @@ sub _get_default_url {
     __wail( 'No CPAN URL obtained from ' . $self->default_cpan_source() );
 }
 
+# modules/02packages.details.txt.gz and modules/03modlist.data.gz have
+# metadata at the top. This metadata is organized as lines of
+#     key: value
+# with the key left-justified. Lines can be wrapped, with leading
+# spaces.
+
 sub _read_meta {
     my ( $self, $fh ) = @_;
     my %meta;
@@ -505,15 +499,6 @@ CPAN::Access::AdHoc - Retrieve stuff from an arbitrary CPAN repository
  } else {
      print "$module is not indexed\n";
  }
-
-=head1 NOTICE
-
-Effective with version 0.000_03:
-
-* Methods whose names contain C<'package'> are removed. Use the
-correspondingly-named C<'distribution'> methods.
-
-* Method fetch_registered_module_index() now returns a hash.
 
 =head1 DESCRIPTION
 
@@ -595,12 +580,20 @@ to an empty L<Config::Tiny|Config::Tiny> object.
 =head3 cpan
 
 When called with no arguments, this method acts as an accessor, and
-returns the URL of the CPAN repository accessed by this object.
+returns a L<URI|URI> object representing the URL of the CPAN repository
+being accessed.
 
-When called with an argument, this method acts as a mutator. It sets
-the URL of the CPAN repository accessed by this object, and (for reasons
-of sanity) calls L<flush()|/flush> to purge any data cached from the old
-repository.
+When called with an argument, this method acts as a mutator. It sets the
+URL of the CPAN repository accessed by this object, and (for reasons of
+sanity) calls L<flush()|/flush> to purge any data cached from the old
+repository. The argument can be either a string or an object that
+stringifies (such as a L<URI|URI> object). To be valid, the scheme must
+be supported by L<LWP::UserAgent|LWP::UserAgent> (that is,
+C<LWP::Protocol::implementor()> must return a true value), and must
+support a hierarchical name space. That means that schemes like
+C<file:>, C<http:>, and C<ftp:> are accepted, but schemes like
+C<mailto:> (non-hierarchical name space) and C<foobar:> (not known to be
+supported by C<LWP::UserAgent>) are not.
 
 If the argument is C<undef>, the default URL as computed from the
 sources in L<default_cpan_source|/default_cpan_source> is used. If no

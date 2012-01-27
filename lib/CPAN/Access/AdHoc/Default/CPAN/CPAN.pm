@@ -7,7 +7,7 @@ use warnings;
 
 use CPAN::Access::AdHoc::Util qw{ __load };
 
-our $VERSION = '0.000_05';
+our $VERSION = '0.000_06';
 
 my $configured = eval {
     __load( 'CPAN' );
@@ -30,16 +30,7 @@ sub get_default {
 	and @{ $CPAN::Config->{urllist} }
 	or return;
 
-    return _mung_url( @{ $CPAN::Config->{urllist} } );
-}
-
-sub _mung_url {
-    my @arg = @_;
-    foreach my $url ( @arg ) {
-	$url =~ m{ / \z }smx
-	    or $url .= '/';
-    }
-    return @arg;
+    return @{ $CPAN::Config->{urllist} };
 }
 
 1;
