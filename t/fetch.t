@@ -15,10 +15,10 @@ my $no_temp_dir;
 BEGIN {
     eval {
 	require File::Temp;
-	File::Temp->can( 'newdir' );
-	1;
+	File::Temp->can( 'new' ) && File::Temp->can( 'newdir' );
     } or do {
-	$no_temp_dir = 'File::Temp unavailable, or does not support newdir()';
+	$no_temp_dir =
+	'File::Temp unavailable, or does not support new() or newdir()';
     };
 }
 
@@ -237,7 +237,7 @@ is_deeply [ $cad->indexed_distributions() ], [ qw{
 # Test access to .tar.gz archive
 
 SKIP: {
-    my $tests = 8;
+    my $tests = 10;
 
     my $pkg = $module_index->{Yehudi}{distribution}
 	or skip q{Module 'Yehudi' not indexed}, $tests;
@@ -326,13 +326,12 @@ SKIP: {
     is $meta->name(), 'Johann', q{Module name is 'Johann'};
 
     is $meta->version(), '0.001', q{Module version is 0.001};
-
 }
 
 # Test access to .zip archive
 
 SKIP: {
-    my $tests = 8;
+    my $tests = 9;
 
     my $pkg = $module_index->{PDQ}{distribution}
 	or skip q{Module 'PDQ' not indexed}, $tests;
@@ -420,6 +419,17 @@ sub slurp {
     local $/ = undef;
     open my $fh, '<', $fn
 	or die "Unable to open $fn for input: $!\n";
+    my $text = <$fh>;
+    close $fh;
+    return $text;
+}
+
+sub slurp_bin {
+    my ( $fn ) = @_;
+    local $/ = undef;
+    open my $fh, '<', $fn
+	or die "Unable to open $fn for input: $!\n";
+    binmode $fh;
     my $text = <$fh>;
     close $fh;
     return $text;
