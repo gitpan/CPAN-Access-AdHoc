@@ -1,17 +1,17 @@
-# CHECKSUMS file written on Wed Jan 11 17:37:22 2012 GMT by CPAN::Checksums (v2.08)
+# CHECKSUMS file written on Sun Jan 29 03:21:53 2012 GMT by CPAN::Checksums (v2.08)
 $cksum = {
   'Johann-0.001.tar.bz2' => {
-    'md5' => '43b77451a21d0277b98f3bcf3a51df2b',
-    'md5-unbz2' => 'a09ec7c96fbec89928554313466910a1',
-    'mtime' => '2012-01-11',
-    'sha256' => 'fdeae88d0b50b1daf291b294719560fefa2f07c00a353fef1f5500708dd71d95',
-    'sha256-unbz2' => '05b212d387132b7402b7b103e2fd8979e737eadc4383fe6c5046f8a57db59f73',
-    'size' => '2195'
+    'md5' => '20e7113d869985a5aac237931c068e7e',
+    'md5-unbz2' => '6961e6578647af1c706eafe0b4ca5f5b',
+    'mtime' => '2012-01-29',
+    'sha256' => '83656dc8f8c7348320619d41a5e273ab2cbb21040ebd7a88222ff24bfd81af3a',
+    'sha256-unbz2' => '22a92a49a636591556af63292a6c491b04075a97fe6a8309aaa6d19d0db1ba86',
+    'size' => '2198'
   },
   'PDQ-0.000_01.zip' => {
-    'md5' => '5bd16598aeb83ef0ba70ad1f3d792b06',
-    'mtime' => '2012-01-11',
-    'sha256' => '403da6a1f8105c9f0fd6298fbe5d1e0c1ad034a7a343844c3b0acd47401b7ac0',
-    'size' => '3652'
+    'md5' => 'e49f5b43e01e6c82e47c5aa5792a0d2b',
+    'mtime' => '2012-01-29',
+    'sha256' => '5089e622a70b6c1cbd2ba6cac41400555e1b25b383144da5d48b452bc3108bf9',
+    'size' => '3656'
   }
 };
