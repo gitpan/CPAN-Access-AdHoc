@@ -10,7 +10,7 @@ use base qw{ Exporter };
 use LWP::MediaTypes ();
 
 our @EXPORT_OK = qw{
-    __attr __expand_distribution_path __guess_media_type
+    __attr __cache __expand_distribution_path __guess_media_type
     __load __whinge __wail __weep
 };
 
@@ -19,12 +19,18 @@ our %EXPORT_TAGS = (
     carp => [ qw{ __whinge __wail __weep } ],
 );
 
-our $VERSION = '0.000_08';
+our $VERSION = '0.000_09';
 
 sub __attr {
     my ( $self ) = @_;
     my $name_space = caller;
     return ( $self->{$name_space} ||= {} );
+}
+
+sub __cache {
+    my ( $self ) = @_;
+    my $name_space = caller;
+    return ( $self->{'.cache'}{$name_space} ||= {} );
 }
 
 sub __expand_distribution_path {

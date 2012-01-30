@@ -8,7 +8,7 @@ use warnings;
 use Config::Tiny ();
 use CPAN::Access::AdHoc::Archive;
 use CPAN::Access::AdHoc::Util qw{
-    :carp __expand_distribution_path __guess_media_type
+    :carp __attr __cache __expand_distribution_path __guess_media_type
 };
 use Digest::SHA ();
 use File::HomeDir ();
@@ -21,22 +21,26 @@ use Safe;
 use Text::ParseWords ();
 use URI ();
 
-our $VERSION = '0.000_08';
+our $VERSION = '0.000_09';
 
-my @attributes = (
-    [ config		=> \&_attr_config,	],	# Must be first
-    [ default_cpan_source => \&_attr_default_cpan_source,	],
-    [ __debug		=> \&_attr_literal,	],
-    [ cpan		=> \&_attr_cpan,	],	# Must be last
-);
+# In the following list of attribute names, 'config' must be first
+# because it supplies default values for everything else. 'cpan' must be
+# after 'default_cpan_source' because 'default_cpan_source' determines
+# how the default value of 'cpan' is computed.
+my @attributes = qw{ config __debug default_cpan_source cpan };
 
 sub new {
     my ( $class, %arg ) = @_;
 
     my $self = bless {}, ref $class || $class;
 
-    foreach my $attr ( @attributes ) {
-	my $name = $attr->[0];
+    return $self->__init( %arg );
+}
+
+sub __init {
+    my ( $self, %arg ) = @_;
+
+    foreach my $name ( @attributes ) {
 	$self->$name( delete $arg{$name} );
     }
 
@@ -88,8 +92,9 @@ sub fetch {
 sub fetch_author_index {
     my ( $self ) = @_;
 
-    exists $self->{_cache}{author_index}
-	and return $self->{_cache}{author_index};
+    my $cache = $self->__cache();
+    exists $cache->{author_index}
+	and return $cache->{author_index};
 
     my $author_details = $self->fetch(
 	'authors/01mailrc.txt.gz'
@@ -111,7 +116,7 @@ sub fetch_author_index {
 	};
     }
 
-    return ( $self->{_cache}{author_index} = \%author_index );
+    return ( $cache->{author_index} = \%author_index );
 }
 
 sub fetch_distribution_archive {
@@ -129,20 +134,23 @@ sub fetch_distribution_checksums {
 	and $file = '';
     my $path = __expand_distribution_path( $dir . 'CHECKSUMS' );
     ( $dir = $path ) =~ s{ [^/]* \z }{}smx;
-    $self->{_cache}{checksums}{$dir} ||= _eval_string(
+    my $cache = $self->__cache();
+    $cache->{checksums}{$dir} ||= _eval_string(
 	$self->fetch( "authors/id/$path" )->get_item_content() );
     $file eq ''
-	and return $self->{_cache}{checksums}{$dir};
-    return $self->{_cache}{checksums}{$dir}{$file};
+	and return $cache->{checksums}{$dir};
+    return $cache->{checksums}{$dir}{$file};
 }
 
 sub fetch_module_index {
     my ( $self ) = @_;
 
-    exists $self->{_cache}{module_index}
+    my $cache = $self->__cache();
+
+    exists $cache->{module_index}
 	and return wantarray ?
-	    @{ $self->{_cache}{module_index} } :
-	    $self->{_cache}{module_index}[0];
+	    @{ $cache->{module_index} } :
+	    $cache->{module_index}[0];
 
     my $packages_details = $self->fetch(
 	'modules/02packages.details.txt.gz'
@@ -165,7 +173,7 @@ sub fetch_module_index {
 	};
     }
 
-    $self->{_cache}{module_index} = [ \%module, $meta ];
+    $cache->{module_index} = [ \%module, $meta ];
 
     return wantarray ? ( \%module, $meta ) : \%module;
 }
@@ -173,10 +181,11 @@ sub fetch_module_index {
 sub fetch_registered_module_index {
     my ( $self ) = @_;
 
-    exists $self->{_cache}{registered_module_index}
+    my $cache = $self->__cache();
+    exists $cache->{registered_module_index}
 	and return wantarray ?
-	    @{ $self->{_cache}{registered_module_index} } :
-	    $self->{_cache}{registered_module_index}[0];
+	    @{ $cache->{registered_module_index} } :
+	    $cache->{registered_module_index}[0];
 
     my $packages_details = $self->fetch(
 	'modules/03modlist.data.gz'
@@ -197,21 +206,24 @@ sub fetch_registered_module_index {
 
     my $hash = _eval_string( "$reg\nCPAN::Modulelist->data();" );
 
-    $self->{_cache}{registered_module_index} = [ $hash, $meta ];
+    $cache->{registered_module_index} = [ $hash, $meta ];
 
     return wantarray ? ( $hash, $meta ) : $hash;
 }
 
 sub flush {
     my ( $self ) = @_;
-    delete $self->{_cache};
+    delete $self->{'.cache'};
     return $self;
 }
 
 sub indexed_distributions {
     my ( $self ) = @_;
-    $self->{_cache}{indexed_distributions}
-	and return @{ $self->{_cache}{indexed_distributions} };
+
+    my $cache = $self->__cache();
+
+    $cache->{indexed_distributions}
+	and return @{ $cache->{indexed_distributions} };
 
     my $inx = $self->fetch_module_index();
 
@@ -220,34 +232,60 @@ sub indexed_distributions {
 	$pkg{$info->{distribution}}++;
     }
 
-    return @{ $self->{_cache}{indexed_distributions} = [ sort keys %pkg ] };
+    return @{ $cache->{indexed_distributions} = [ sort keys %pkg ] };
 }
 
 # Set up the accessor/mutators. All mutators interpret undef as being a
 # request to restore the default, from the configuration if that exists,
 # or from the configured default code.
 
-foreach my $info ( @attributes ) {
-    my ( $name, $mutator ) = @{ $info };
-    __PACKAGE__->can( $name ) and next;
+__PACKAGE__->__create_accessor_mutators( @attributes );
+
+sub _create_accessor_mutator_helper {
+    my ( $class, $name, $code ) = @_;
+    $class->can( $name )
+	and return;
+    my $full_name = "${class}::$name";
     no strict qw{ refs };
-    *$name = sub {
-	my ( $self, @arg ) = @_;
-	if ( @arg ) {
-	    my $value = $arg[0];
-	    if ( ! defined $value ) {
-		my $config = $self->config();
-		$value = $config->{_}{$name};
-	    }
-	    $self->{$name} = $mutator->( $self, $name, $value );
-	    return $self;
-	} else {
-	    return $self->{$name};
-	}
-    };
+    *$full_name = $code;
+    return;
 }
 
-# Compute the value of the config attribute.
+sub __create_accessor_mutators {
+    my ( $class, @attrs ) = @_;
+    foreach my $name ( @attrs ) {
+	$class->can( $name ) and next;
+	my $full_name = "${class}::$name";
+	$class->_create_accessor_mutator_helper(
+	    "__attr__${name}__validate" => sub { return $_[1] } );
+	$class->_create_accessor_mutator_helper(
+	    "__attr__${name}__post_assignment" => sub { return $_[1] } );
+	no strict qw{ refs };
+	*$full_name = sub {
+	    my ( $self, @arg ) = @_;
+	    my $attr = $self->__attr();
+	    if ( @arg ) {
+		my $value = $arg[0];
+		not defined $value
+		    and 'config' ne $name
+		    and $value = $self->config()->{_}{$name};
+		my $code;
+		not defined $value
+		    and $code = $self->can( "__attr__${name}__default" )
+		    and $value = $code->( $self );
+		$code = $self->can( "__attr__${name}__validate" )
+		    and $value = $code->( $self, $value );
+		$attr->{$name} = $value;
+		$code = $self->can( "__attr__${name}__post_assignment" )
+		    and $code->( $self );
+		return $self;
+	    } else {
+		return $attr->{$name};
+	    }
+	};
+    }
+    return;
+}
 
 {
 
@@ -260,87 +298,75 @@ foreach my $info ( @attributes ) {
     defined $config_dir
 	and $config_path = File::Spec->catfile( $config_dir, $config_file );
 
-    sub _attr_config {
-	my ( $self, $name, $value ) = @_;
-
-	# If the new value is defined, it must be a Config::Tiny object
-	if ( defined $value ) {
-	    ref $value
-		and eval {
-		    $value->isa( 'Config::Tiny' );
-		    1;
-		}
-		or __wail(
-		    "Attribute '$name' must be a Config::Tiny reference" );
-	# If the config file exists, read it
-	} elsif ( defined $config_path && -f $config_path ) {
-	    $value = Config::Tiny->read( $config_path );
-
-	# Otherwise generate an empty configuration
-	} else {
-	    $value = Config::Tiny->new();
-	}
-
-	# Disallow the config key.
-	delete $value->{_}{config};
-
-	return $value;
+    sub __attr__config__default {
+	my ( $self ) = @_;
+	defined $config_path
+	    and -f $config_path
+	    and return Config::Tiny->read( $config_path );
+	return Config::Tiny->new();
     }
 }
 
-# Compute the value of the default_cpan_source attribute
+sub __attr__config__validate {
+    my ( $self, $value ) = @_;
 
-sub _attr_default_cpan_source {
-    my ( $self, $name, $value ) = @_;
+    my $err = "Attribute 'config' must be a file name or a " .
+	"Config::Tiny reference";
+    if ( ref $value ) {
+	eval {
+	    $value->isa( 'Config::Tiny' );
+	} or __wail( $err );
+    } else {
+	-f $value
+	    or __wail( $err );
+	$value = Config::Tiny->read( $value );
+    }
 
-    # The rationale of the default order is:
-    # 1) Mini cpan: guaranteed to be local, and since it is non-core,
-    #    the user had to install it, and can be presumed to be using it.
-    # 2) CPAN minus: since it is non-core, the user had to install it,
-    #    and can be presumed to be using it.
-    # 3) CPAN: It is core, but it needs to be set up to be used, and the
-    #    wrapper will detect if it has not been set up.
-    # 4) CPANPLUS: It is core as of 5.10, and works out of the box, so
-    #    we can not presume that the user actually uses it.
-    defined $value
-	or $value = 'CPAN::Mini,cpanm,CPAN,CPANPLUS';
-    $self->_expand_default_cpan_source( $value );
-
+    delete $value->{_}{config};
     return $value;
 }
 
-# Compute the value of a literal attribute
+# The rationale of the default order is:
+# 1) Mini cpan: guaranteed to be local, and since it is non-core,
+#    the user had to install it, and can be presumed to be using it.
+# 2) CPAN minus: since it is non-core, the user had to install it,
+#    and can be presumed to be using it.
+# 3) CPAN: It is core, but it needs to be set up to be used, and the
+#    wrapper will detect if it has not been set up.
+# 4) CPANPLUS: It is core as of 5.10, and works out of the box, so
+#    we can not presume that the user actually uses it.
+sub __attr__default_cpan_source__default {
+    return 'CPAN::Mini,cpanm,CPAN,CPANPLUS';
+}
 
-sub _attr_literal {
-    my ( $self, $name, $value );
+sub __attr____debug__validate {
+    my ( $self, $value ) = @_;
     return $value;
 }
 
-# Compute the value of the cpan attribute. The actual computation of the
-# default URL is outsourced to _get_default_url(). The attribute needs a
-# trailing slash so we can just slap the path on the end of it.
+sub __attr__cpan__post_assignment {
+    my ( $self ) = @_;
 
-sub _attr_cpan {
-    my ( $self, $name, $value ) = @_;
+    $self->flush();
 
-    defined $value
-	or $value = $self->_get_default_url();
+    return;
+}
+
+sub __attr__cpan__validate {
+    my ( $self, $value ) = @_;
 
     $value = "$value";	# Stringify
     $value =~ s{ (?<! / ) \z }{/}smx;
 
     my $url = URI->new( $value )
 	or _wail( "Bad URL '$value'" );
-    {
-	my $scheme = $url->scheme();
-	my $ua = LWP::UserAgent->new();
-	$url->can( 'authority' )
-	    and LWP::Protocol::implementor( $scheme )
-	    or __wail ( "URL scheme $scheme: is unsupported" );
-    }
     $value = $url;
 
-    $self->flush();
+    my $scheme = $value->scheme();
+    my $ua = LWP::UserAgent->new();
+    $value->can( 'authority' )
+	and LWP::Protocol::implementor( $scheme )
+	or __wail ( "URL scheme $scheme: is unsupported" );
 
     return $value;
 }
@@ -381,25 +407,31 @@ sub _checksum {
 {
 
     my $search_path = 'CPAN::Access::AdHoc::Default::CPAN';
-    my %defaulter = map {
-	substr( $_, length( $search_path ) + 2 ) => $_
-    } Module::Pluggable::Object->new(
+    my %defaulter = map { (
+        $_ => $_,
+	substr( $_, length( $search_path ) + 2 ) => $_,
+    ) } Module::Pluggable::Object->new(
 	search_path	=> $search_path,
 	inner	=> 0,
 	require	=> 1,
     )->plugins();
 
-    sub _expand_default_cpan_source {
+    sub __attr__default_cpan_source__validate {
 	my ( $self, $value ) = @_;
-	defined $value
-	    or $value = $self->default_cpan_source();
+
+	ref $value
+	    or $value = [ split qr{ \s* , \s* }smx, $value ];
+
+	'ARRAY' eq ref $value
+	    or __wail( q{Attribute 'default_cpan_source' takes an array } .
+	    q{reference or a comma-delimited string} );
 	my @rslt;
-	foreach my $source ( split qr{ \s* , \s* }smx, $value ) {
+	foreach my $source ( @{ $value } ) {
 	    defined( my $class = $defaulter{$source} )
 		or __wail( "Unknown default_cpan_source '$source'" );
 	    push @rslt, $class;
 	}
-	return @rslt;
+	return \@rslt;
     }
 
 }
@@ -416,20 +448,20 @@ sub _eval_string {
 }
 
 # Get the repository URL from the first source that actually supplies
-# it. The CPAN::Access::AdHoc::Default::CPAN plug-ins are called in the order
-# specified in the default_cpan_source attribute, and the first source
-# that actually supplies a URL is used. If that source provides a file:
-# URL, the first such is returned. Otherwise the first URL is returned,
-# whatever its scheme. If no URL can be determined, we die.
+# it. The CPAN::Access::AdHoc::Default::CPAN plug-ins are called in the
+# order specified in the default_cpan_source attribute, and the first
+# source that actually supplies a URL is used. If that source provides a
+# file: URL, the first such is returned. Otherwise the first URL is
+# returned, whatever its scheme. If no URL can be determined, we die.
 
-sub _get_default_url {
+sub __attr__cpan__default {
     my ( $self ) = @_;
 
     my $url;
 
     my $debug = $self->__debug();
 
-    foreach my $class ( $self->_expand_default_cpan_source() ) {
+    foreach my $class ( @{ $self->default_cpan_source() } ) {
 
 	my @url_list = $class->get_default()
 	    or next;
@@ -602,15 +634,17 @@ URL can be computed from any source, an exception is thrown.
 =head3 default_cpan_source
 
 When called with no arguments, this method acts as an accessor, and
-returns the current list of default CPAN sources as a comma-delimited
-string.
+returns the current list of default CPAN sources as an array reference.
+B<This is incompatible with version 0.000_08 and before>, where the
+return was a comma-delimited string.
 
 When called with an argument, this method acts as a mutator, and sets
-the list of default CPAN sources. This list is a comma-delimited string,
-and consists of the names of zero or more
-C<CPAN::Access::AdHoc::Default::CPAN::*> classes, with the common
-prefix removed. See the documentation of these classes for more
-information.
+the list of default CPAN sources. This list is either an array reference
+or a comma-delimited string, and consists of the names of zero or more
+C<CPAN::Access::AdHoc::Default::CPAN::*> classes. With either mechanism
+the names of the classes may be passed without the common prefix, which
+will be added back if needed. See the documentation of these classes for
+more information.
 
 If any of the elements in the string does not represent an existing
 C<CPAN::Access::AdHoc::Default::CPAN::> class, an exception is thrown
@@ -776,6 +810,99 @@ when needed.
 This convenience method returns a list of all indexed distributions in
 ASCIIbetical order. This information is derived from the results of
 L<fetch_module_index()|/fetch_module_index>, and is cached.
+
+=head2 Subclass Methods
+
+The following methods exist for the benefit of subclasses, and should
+not be considered part of the public interface. I am willing to make
+this interface public on request, but until the request comes I will
+consider myself at liberty to modify it without notice.
+
+=head3 __attr
+
+This method returns a hash containing all attributes specific to the
+class that makes the call. This hash may be modified, and in fact must
+be to store new attribute values.
+
+=head3 __cache
+
+This method returns a hash containing all values cached by the object.
+This hash may be modified, and in fact must be to cache new values.
+
+=head3 __create_accessor_mutators
+
+ __PACKAGE__->__create_accessor_mutators( @attributes );
+
+This static method creates accessor/mutator methods for the attributes
+named in its argument list. If a subroutine with the same name as an
+attribute exists at the time this method is called, that subroutine is
+assumed to be the accessor/mutator for that attribute.
+
+The methods created by C<__create_accessor_mutators()> have three hooks
+for behavior modification. For any attribute C<whatever>, these are:
+
+=over
+
+=item __attr__whatever__default
+
+ my ( $self, $value ) = @_;
+ my $code;
+ not defined $value
+     and $code = $self->can( '__attr__whatever__default' )
+     and $value = $code->( $self );
+
+This is called when the mutator is passed a new value of C<undef>. Its
+only argument is the invocant. It must return a valid value of the
+attribute.
+
+If a subclass overrides this, the subclass probably should not call
+C<< $self->SUPER::__attr__whatever__default() >>.
+
+=item __attr__whatever__validate
+
+ my ( $self, $value ) = @_;
+ my $code;
+ $code = $self->can( '__attr__whatever__validate' )
+     and $value = $code->( $self, $value );
+
+This method is called after C<__attr__whatever__default()>, and
+validates the value. It rejects a value by throwing an exception. The
+preferred way to do this is by calling C<__wail()>.
+
+If a subclass overrides this, the subclass B<must> execute
+
+ $value = $self->SUPER::__attr__whatever__validate( $value );
+
+before it performs its own validation. The superclass method B<must>
+return the internal format of the attribute's value, which the subclass
+B<must> return after validating.
+
+=item __attr__whatever__post_assignment
+
+ $self->__attr__whatever__post_assignment()
+
+This method is called after the new value has been assigned to the
+attribute.
+
+If a subclass overrides this, it B<must> call
+C<< $self->SUPER::__attr__whatever__post_assignment() >>, and it
+B<should> call it last thing before returning.
+
+=back
+
+All these hooks are optional, but C<__create_accessor_mutators()> will
+generate dummy C<__attr__whatever__validate()> and
+C<__attr__whatever__post_assignment()> methods for any attributes that
+do not have them at the time it is called.
+
+=head3 __init
+
+This method is called when a new object is instantiated. Its arguments
+are a series of name/value pairs. The subclass should override this, and
+the override should make use of any arguments it
+recognizes, deleting them from the argument hash as it does so. The
+override should then call C<< $self->SUPER::__init( %args ) >>, passing
+the superclass all unused arguments.
 
 =head1 SEE ALSO
 
