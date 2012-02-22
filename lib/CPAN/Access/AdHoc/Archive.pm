@@ -14,7 +14,7 @@ use HTTP::Response ();
 use Module::Pluggable::Object;
 use URI::file;
 
-our $VERSION = '0.000_13';
+our $VERSION = '0.000_14';
 
 # Note that this can be called as a mutator, but the mutator
 # functionality is private to the invocant's class.
@@ -137,16 +137,7 @@ sub path {
 sub wrap_archive {
     my ( $class, @args ) = @_;
     my $opt = 'HASH' eq ref $args[0] ? shift @args : {};
-    my ( $fn, $author_dir ) = @args;
-    if ( defined $author_dir ) {
-	if ( 'SCALAR' eq ref $author_dir ) {
-	    __whinge( 'Specifying the directory as the second argument is deprecated in favor of specifying it in a leading options hash' );
-	    $opt->{directory} = ${ $author_dir };
-	} else {
-	    __whinge( 'Specifying the author as the second argument is deprecated in favor of specifying it in a leading options hash' );
-	    $opt->{author} = $author_dir;
-	}
-    }
+    my ( $fn ) = @args;
     -f $fn
 	or __wail( "File $fn not found" );
     my $content;
