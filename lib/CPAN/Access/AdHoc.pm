@@ -18,10 +18,11 @@ use LWP::UserAgent ();
 use LWP::Protocol ();
 use Module::Pluggable::Object;
 use Safe;
+use Scalar::Util qw{ blessed };
 use Text::ParseWords ();
 use URI ();
 
-our $VERSION = '0.000_17';
+our $VERSION = '0.000_18';
 
 # In the following list of attribute names, 'config' must be first
 # because it supplies default values for everything else. 'cpan' must be
@@ -100,9 +101,10 @@ sub fetch_author_index {
     exists $cache->{author_index}
 	and return $cache->{author_index};
 
-    my $author_details = $self->fetch(
-	'authors/01mailrc.txt.gz'
-    )->get_item_content();
+    my $author_details = $self->fetch( 'authors/01mailrc.txt.gz' );
+    _got_archive( $author_details )
+	or return $author_details;
+    $author_details = $author_details->get_item_content();
 
     my $fh = IO::File->new( \$author_details, '<' )
 	or __wail( "Unable to open string reference: $!" );
@@ -110,7 +112,7 @@ sub fetch_author_index {
     my %author_index;
     while ( <$fh> ) {
 	s/ \s+ \z //smx;
-	my ( $kind, $cpan_id, $address ) = Text::ParseWords::parse_line(
+	my ( undef, $cpan_id, $address ) = Text::ParseWords::parse_line(
 	    qr{ \s+ }smx, 0, $_ );
 	( my $name = $address ) =~ s{ \s+ < (.*) > }{}smx;
 	my $mail_addr = $1;
@@ -131,20 +133,32 @@ sub fetch_distribution_archive {
 
 sub fetch_distribution_checksums {
     my ( $self, $distribution ) = @_;
+
     $distribution =~ m{ \A ( .* / ) ( [^/]* ) \z }smx
 	or __wail( "Invalid distribution '$distribution'" );
     my ( $dir, $file ) = ( $1, $2 );
+
     $file eq 'CHECKSUMS'
 	and $file = '';
     my $path = __expand_distribution_path( $dir . 'CHECKSUMS' );
     ( $dir = $path ) =~ s{ [^/]* \z }{}smx;
+
     my $cache = $self->__cache();
-    $cache->{checksums}{$dir} ||= _eval_string(
-	$self->fetch( "authors/id/$path" )->get_item_content() );
+
+    if ( ! $cache->{checksums}{$dir} ) {
+	my $archive = $self->fetch( "authors/id/$path" );
+	_got_archive( $archive )
+	    or return $archive;
+	$cache->{checksums}{$dir} = _eval_string(
+	    $archive->get_item_content() );
+    }
+
     $file eq ''
 	and return $cache->{checksums}{$dir};
     return $cache->{checksums}{$dir}{$file};
 }
+
+# TODO finish implementing error handling. See above, _got_archive().
 
 sub fetch_module_index {
     my ( $self ) = @_;
@@ -390,7 +404,6 @@ sub __attr__cpan__validate {
     $value = $url;
 
     my $scheme = $value->scheme();
-    my $ua = LWP::UserAgent->new();
     $value->can( 'authority' )
 	and LWP::Protocol::implementor( $scheme )
 	or __wail ( "URL scheme $scheme: is unsupported" );
@@ -473,6 +486,17 @@ sub _eval_string {
     my $rslt = $sandbox->reval( $string );
     $@ and __wail( $@ );
     return $rslt;
+}
+
+# Return the argument if it is a CPAN::Access::AdHoc::Archive; otherwise
+# just return.
+
+sub _got_archive {
+    my ( $rtn ) = @_;
+    blessed( $rtn )
+	and $rtn->isa( 'CPAN::Access::AdHoc::Archive' )
+	and return $rtn;
+    return;
 }
 
 # Get the repository URL from the first source that actually supplies
@@ -1016,7 +1040,7 @@ Thomas R. Wyant, III F<wyant at cpan dot org>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2012 by Thomas R. Wyant, III
+Copyright (C) 2012-2013 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text
