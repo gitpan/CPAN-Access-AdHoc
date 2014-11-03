@@ -14,7 +14,7 @@ use HTTP::Response ();
 use Module::Pluggable::Object;
 use URI::file;
 
-our $VERSION = '0.000_18';
+our $VERSION = '0.000_194';
 
 # Note that this can be called as a mutator, but the mutator
 # functionality is private to the invocant's class.
@@ -195,16 +195,6 @@ CPAN::Access::AdHoc::Archive - Common archive functionality for CPAN::Access::Ad
 =head1 SYNOPSIS
 
 This class is not intended to be used directly.
-
-=head1 NOTICE
-
-Effective with version 0.000_12:
-
-Method C<wrap_archive()> takes an optional leading hash. You can use
-either key C<{author}> to specify the CPAN author ID for the archive, or
-key C<{directory}> to specify its archive relative to the CPAN root. The
-argument after the file name is deprecated, and will be removed a week
-after the publication of 0.000_12.
 
 =head1 DESCRIPTION
 
@@ -428,7 +418,7 @@ Thomas R. Wyant, III F<wyant at cpan dot org>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2012-2013 by Thomas R. Wyant, III
+Copyright (C) 2012-2014 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text

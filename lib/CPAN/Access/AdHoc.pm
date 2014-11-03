@@ -22,7 +22,7 @@ use Scalar::Util qw{ blessed };
 use Text::ParseWords ();
 use URI ();
 
-our $VERSION = '0.000_18';
+our $VERSION = '0.000_194';
 
 # In the following list of attribute names, 'config' must be first
 # because it supplies default values for everything else. 'cpan' must be
@@ -59,25 +59,28 @@ sub corpus {
     my ( $self, $cpan_id ) = @_;
     $cpan_id = uc $cpan_id;
 
-    my $re = join '/',
+    my $prefix = join '/',
 	substr( $cpan_id, 0, 1 ),
 	substr( $cpan_id, 0, 2 ),
 	$cpan_id;
 
-    $re = qr{ \A \Q$re\E / }smx;
-    return ( grep { $_ =~ $re } $self->indexed_distributions() );
+    return (
+	map { "$prefix/$_" }
+	grep { $_ !~ m/ [.] meta \z /smx }
+	sort keys %{ $self->fetch_distribution_checksums( $cpan_id ) }
+    );
+}
+
+sub exists : method {	## no critic (ProhibitBuiltinHomonyms)
+    my ( $self, $path ) = @_;
+
+    return $self->_request_path( head => $path )->is_success();
 }
 
 sub fetch {
     my ( $self, $path ) = @_;
 
-    $path =~ s{ \A / }{}smx;
-
-    my $ua = LWP::UserAgent->new();
-
-    my $url = $self->cpan() . $path;
-
-    my $rslt = $ua->get( $url );
+    my $rslt = $self->_request_path( get => $path );
 
     $rslt->is_success
 	or return $self->http_error_handler()->( $self, $path, $rslt );
@@ -134,6 +137,10 @@ sub fetch_distribution_archive {
 sub fetch_distribution_checksums {
     my ( $self, $distribution ) = @_;
 
+    $distribution =~ s{ \A ( . ) / \1 ( . ) / \1 \2 ( [^/]* ) }
+	{$1$2$3}smx;
+    $distribution =~ m{ / }smx
+	or $distribution .= '/';
     $distribution =~ m{ \A ( .* / ) ( [^/]* ) \z }smx
 	or __wail( "Invalid distribution '$distribution'" );
     my ( $dir, $file ) = ( $1, $2 );
@@ -562,6 +569,23 @@ sub _read_meta {
     return \%meta;
 }
 
+# Request a path relative to the root of the CPAN repository. The
+# arguments are the request name (which must be a valid method for
+# LWP::UserAgent, something like 'get' or 'head'. The HTTP::Response
+# object is returned.
+
+sub _request_path {
+    my ( $self, $rqst, $path ) = @_;
+
+    $path =~ s{ \A / }{}smx;
+
+    my $ua = $self->{__user_agent} || LWP::UserAgent->new();
+
+    my $url = $self->cpan() . $path;
+
+    return $ua->$rqst( $url );
+}
+
 
 1;
 
@@ -741,6 +765,15 @@ the author with the given CPAN ID. This information is derived from the
 output of L<indexed_distributions()|/indexed_distributions>. The
 argument is converted to upper case before use.
 
+=head3 exists
+
+This method returns true if the named file exists in the CPAN
+repository, and false otherwise. Its argument is the name of the file
+relative to the root of the repository.
+
+This method should be faster than L<fetch()|/fetch>, because it does not
+actually retrieve the archive.
+
 =head3 fetch
 
 This method fetches the named file from the CPAN repository. Its
@@ -842,7 +875,11 @@ example can also be written as
  print Dump( $cad->fetch_distribution_checksums(
      'B/BA/BACH/' ) );
  print Dump( $cad->fetch_distribution_checksums(
+     'BACH' ) );        # equivalent to previous
+ print Dump( $cad->fetch_distribution_checksums(
      'B/BA/BACH/Johann-0.001.tar.bz2' ) );
+ print Dump( $cad->fetch_distribution_checksums(
+     'BACH/Johann-0.001.tar.bz2' ) );   # ditto
 
 This method takes as its argument either a file name or a directory name
 relative to F<authors/id/>. A directory is indicated by a trailing
@@ -1040,7 +1077,7 @@ Thomas R. Wyant, III F<wyant at cpan dot org>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2012-2013 by Thomas R. Wyant, III
+Copyright (C) 2012-2014 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text

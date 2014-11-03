@@ -1,3 +1,41 @@
+0.000_194	2014-11-02	T. R. Wyant
+  Add eg/cpan-adhoc options -production, -development, -date.
+  Add eg/distro-by
+  Finally fix undef hash key problem in corpus().
+
+0.000_193	2014-10-31	T. R. Wyant
+  Try (unsuccessfully, as it turns out) to fix undefined value error in
+    eg/cpan-adhoc corpus
+  Add -latest option to eg/cpan-adhoc corpus. This causes only the
+    highest-numbered version of each release to be listed.
+
+0.000_192	2014-10-31	T. R. Wyant
+  Base corpus() on the author's CHECKSUMS file instead of plowing
+    through indexed distributions.
+  In the eg/cpan-adhoc corpus command, add -verbose as a synonym for
+    -full.
+
+0.000_191	2014-03-21	T. R. Wyant
+  Have the CPAN::Access::AdHoc::Archive::Zip item_present() check for
+    the item by name with Archive::Zip memberNamed() rather than
+    searching for it with membersMatching().
+  Various tweaks to eg/cpan-adhoc:
+    - Make it more pipe-friendly;
+    - Add -full to the 'corpus' command;
+    - Add 'info' command;
+    - Add 'write' command;
+  Fix various test failures.
+
+0.000_19	2013-08-06	T. R. Wyant
+  Substantial rewrite to eg/cpan-adhoc to try to make it much smarter
+    about retrieving distributions. Also make every command that takes a
+    file name take a module name as well.
+  Make CPAN::Access::AdHoc method fetch_distribution_checksums() conform
+    to its documentation.
+  Add CPAN::Access::AdHoc method exists(), which takes the name of a
+    file (relative to the root of the archive) and returns true if it
+    exists, and false otherwise.
+
 0.000_18	2013-07-28	T. R. Wyant
   Get rid of unused variables.
 

@@ -56,6 +56,8 @@ EOD
 sub ACTION_authortest {
     my ( $self, @args ) = @_;
 
+    local $ENV{AUTHOR_TESTING} = 1;
+
     my @depends_on = qw{ build make_optional_modules_tests };
     -e 'META.yml'
 	or push @depends_on, 'distmeta';
@@ -194,7 +196,7 @@ Thomas R. Wyant, III F<wyant at cpan dot org>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2012-2013 by Thomas R. Wyant, III
+Copyright (C) 2012-2014 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text

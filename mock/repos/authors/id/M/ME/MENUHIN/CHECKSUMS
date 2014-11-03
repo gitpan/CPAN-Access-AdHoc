@@ -1,11 +1,11 @@
-# CHECKSUMS file written on Wed Feb  1 00:23:55 2012 GMT by CPAN::Checksums (v2.08)
+# CHECKSUMS file written on Wed Feb 19 18:55:08 2014 GMT by CPAN::Checksums (v2.08)
 $cksum = {
   'Yehudi-0.001.tar.gz' => {
-    'md5' => 'e723bfa24a3d6ff295db7b818ddfd8c2',
-    'md5-ungz' => 'bcbee2a2a06c37a3ed2afb0cbac01c56',
-    'mtime' => '2012-02-01',
-    'sha256' => 'dcbff3428acad2db9428e5faae4ef1b060c0fe561742134451f4a71cc58a665f',
-    'sha256-ungz' => '04dfef4bab777b95de8cc8330bea312481fb21f4605c0f0ae1bfeff59fd6a064',
-    'size' => '2252'
+    'md5' => 'f6d5b454e8efc4c4ff7cc0ea8b40cdd0',
+    'md5-ungz' => '4af8fc3ce9381970d569bdc6880cafdb',
+    'mtime' => '2014-02-19',
+    'sha256' => '89912a6134096bc8b61e9944a47bbf43522bc2492f3789faf3a463b411ce4644',
+    'sha256-ungz' => '47a15816020763be7d7912829925fea1d3fd25566d5adb1d6b14df963a0bd397',
+    'size' => 2221
   }
 };

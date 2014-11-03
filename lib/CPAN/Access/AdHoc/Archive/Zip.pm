@@ -12,7 +12,7 @@ use CPAN::Access::AdHoc::Util qw{ :carp __guess_media_type };
 use File::Spec::Unix ();
 use IO::File ();
 
-our $VERSION = '0.000_18';
+our $VERSION = '0.000_194';
 
 {
 
@@ -125,8 +125,7 @@ sub get_item_mtime {
 sub item_present {
     my ( $self, $name ) = @_;
     $name = $self->base_directory() . $name;
-    my $re = qr{ \A \Q$name\E \z }smx;
-    return scalar $self->archive()->membersMatching( $re );
+    return $self->archive()->memberNamed( $name ) ? 1 : 0;
 }
 
 sub list_contents {
@@ -256,7 +255,7 @@ Thomas R. Wyant, III F<wyant at cpan dot org>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2012-2013 by Thomas R. Wyant, III
+Copyright (C) 2012-2014 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text
